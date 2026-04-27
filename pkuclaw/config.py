@@ -40,12 +40,6 @@ class FeishuConfig:
 
 
 @dataclass(frozen=True)
-class Pku3bConfig:
-    bin: Path
-    source_dir: Path
-
-
-@dataclass(frozen=True)
 class CodexConfig:
     bin: str
     sandbox: str
@@ -55,7 +49,7 @@ class CodexConfig:
 
 
 @dataclass(frozen=True)
-class CodeAgentConfig:
+class AgentConfig:
     provider: str
 
 
@@ -69,14 +63,20 @@ class MonitorConfig:
 
 
 @dataclass(frozen=True)
+class McpConfig:
+    host: str
+    port: int
+
+
+@dataclass(frozen=True)
 class Settings:
     config_path: Path
     app: AppConfig
     feishu: FeishuConfig
-    pku3b: Pku3bConfig
-    code_agent: CodeAgentConfig
+    agent: AgentConfig
     codex: CodexConfig
     monitor: MonitorConfig
+    mcp: McpConfig
 
 
 def load_settings(config_path: Path | None = None) -> Settings:
@@ -86,10 +86,10 @@ def load_settings(config_path: Path | None = None) -> Settings:
 
     app_raw = _get_section(raw, "app")
     feishu_raw = _get_section(raw, "feishu")
-    pku3b_raw = _get_section(raw, "pku3b")
-    code_agent_raw = _get_section(raw, "code_agent")
+    agent_raw = _get_section(raw, "agent")
     codex_raw = _get_section(raw, "codex")
     monitor_raw = _get_section(raw, "monitor")
+    mcp_raw = _get_section(raw, "mcp")
 
     app = AppConfig(
         name=_read_str(app_raw, "name", default="PkuClaw"),
@@ -110,12 +110,8 @@ def load_settings(config_path: Path | None = None) -> Settings:
         api_base=os.environ.get("FEISHU_API_BASE", "").strip()
         or _read_str(feishu_raw, "api_base", default=DEFAULT_FEISHU_API_BASE),
     )
-    pku3b = Pku3bConfig(
-        bin=Path(_read_str(pku3b_raw, "bin", default="crates/pku3b/target/debug/pku3b")),
-        source_dir=Path(_read_str(pku3b_raw, "source_dir", default="crates/pku3b")),
-    )
-    code_agent = CodeAgentConfig(
-        provider=_read_str(code_agent_raw, "provider", default="codex").lower(),
+    agent = AgentConfig(
+        provider=_read_str(agent_raw, "provider", default="codex").lower(),
     )
     codex = CodexConfig(
         bin=_read_str(codex_raw, "bin", default="codex"),
@@ -139,14 +135,18 @@ def load_settings(config_path: Path | None = None) -> Settings:
         enable_replays=_read_bool(monitor_raw, "enable_replays", default=True),
         enable_grades=_read_bool(monitor_raw, "enable_grades", default=False),
     )
+    mcp = McpConfig(
+        host=_read_str(mcp_raw, "host", default="127.0.0.1"),
+        port=max(1, _read_int(mcp_raw, "port", default=8765)),
+    )
     return Settings(
         config_path=path,
         app=app,
         feishu=feishu,
-        pku3b=pku3b,
-        code_agent=code_agent,
+        agent=agent,
         codex=codex,
         monitor=monitor,
+        mcp=mcp,
     )
 
 

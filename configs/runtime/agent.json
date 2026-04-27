@@ -1,0 +1,26 @@
+{
+  "agent": {
+    "provider": "codex",
+    "mode": "standard",
+    "model": "",
+    "reasoning_effort": ""
+  },
+  "codex": {
+    "sandbox": "workspace-write",
+    "timeout_seconds": 1800
+  },
+  "loop": {
+    "interval_seconds": 900,
+    "prompt": "检查课程状态、教学网通知和本地数据。如果没有重要变化，保持静默；如果发现重要变化，可以通过 channel MCP tools 主动通知用户。",
+    "skill_names": [
+      "tasks/sync-notices.md"
+    ]
+  },
+  "prompt": {
+    "fragment_paths": [],
+    "default_skill_names": []
+  },
+  "notifications": {
+    "policy": "important_only"
+  }
+}

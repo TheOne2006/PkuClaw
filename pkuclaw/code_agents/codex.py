@@ -8,19 +8,15 @@ import time
 from pathlib import Path
 from typing import Any
 
-from pkuclaw.capabilities import render_capabilities
+from pkuclaw.agents.base import AgentRunContext
 from pkuclaw.config import Settings
 from pkuclaw.core import logging as log
 from pkuclaw.core.models import (
-    CodeAgentEvent,
-    CodeAgentEventSink,
-    CodeAgentResult,
-    CodeAgentSettings,
-    TaskPlan,
-    merge_agent_settings,
+    AgentEvent,
+    AgentEventSink,
+    AgentResult,
+    AgentSettings,
 )
-from pkuclaw.core.store import RunRecord, Store
-from pkuclaw.runtime_config import RuntimeConfigLoader
 
 class CodexAgent:
     name = "codex"
@@ -29,64 +25,32 @@ class CodexAgent:
         self,
         *,
         settings: Settings,
-        store: Store,
-        runtime_config: RuntimeConfigLoader,
         repo_root: Path | None = None,
     ) -> None:
         self.settings = settings
-        self.store = store
-        self.runtime_config = runtime_config
         self.repo_root = (repo_root or Path.cwd()).resolve()
-        self.runs_dir = self.settings.app.data_dir / "code_agent_runs" / self.name
 
-    def run(
+    def execute(
         self,
-        run: RunRecord,
-        plan: TaskPlan,
-        sink: CodeAgentEventSink,
-    ) -> CodeAgentResult:
-        conversation = self.store.ensure_conversation(run.conversation_id)
-        runtime = self.runtime_config.read()
-        agent_settings = merge_agent_settings(
-            runtime.code_agent,
-            conversation.agent_settings,
-        )
-        run_dir = self.runs_dir / run.run_id
-        run_dir.mkdir(parents=True, exist_ok=True)
+        context: AgentRunContext,
+        prompt: str,
+        sink: AgentEventSink,
+    ) -> AgentResult:
+        run = context.run
+        agent_settings = context.agent_settings
+        paths = context.paths
         log.event(
-            "code agent context: "
-            f"agent={self.name}, run={run.run_id}, intent={plan.intent}, "
+            "codex agent context: "
+            f"agent={self.name}, run={run.run_id}, intent={context.plan.intent}, "
             f"mode={agent_settings.mode}, "
             f"model={self._effective_model(agent_settings) or 'default'}, "
             "reasoning="
             f"{self._effective_reasoning(agent_settings) or 'default'}, "
-            f"existing_thread={conversation.agent_session_id or 'none'}"
-        )
-
-        prompt_path = run_dir / "prompt.md"
-        result_path = run_dir / "result.md"
-        stdout_path = run_dir / "stdout.jsonl"
-        stderr_path = run_dir / "stderr.log"
-
-        log.stage(f"Building Codex prompt: run={run.run_id}")
-        prompt = self._build_prompt(
-            run=run,
-            plan=plan,
-            run_dir=run_dir,
-            runtime=runtime,
-            agent_settings=agent_settings,
-        )
-        prompt_path.write_text(prompt, encoding="utf-8")
-        log.ok(f"Prompt written: {prompt_path} ({len(prompt)} chars)")
-        self.store.mark_run_running(
-            run.run_id,
-            prompt_path=prompt_path,
-            stdout_path=stdout_path,
-            stderr_path=stderr_path,
+            f"existing_thread={context.conversation.agent_session_id or 'none'}"
         )
         _emit_agent_event(
             sink,
-            CodeAgentEvent(
+            AgentEvent(
                 run_id=run.run_id,
                 kind="started",
                 phase="starting",
@@ -102,40 +66,40 @@ class CodexAgent:
 
         before_sessions = _read_session_index()
         command = self._build_command(
-            session_id=conversation.agent_session_id,
-            result_path=result_path,
+            session_id=context.conversation.agent_session_id,
+            result_path=paths.result_path,
             agent_settings=agent_settings,
-            runtime=runtime,
+            runtime=context.runtime,
         )
-        mode = "resume" if conversation.agent_session_id else "new"
+        mode = "resume" if context.conversation.agent_session_id else "new"
         log.stage(
             "Running Codex CLI: "
-            f"mode={mode}, sandbox={self._effective_sandbox(runtime)}, "
-            f"timeout={self._effective_timeout(runtime)}s"
+            f"mode={mode}, sandbox={self._effective_sandbox(context.runtime)}, "
+            f"timeout={self._effective_timeout(context.runtime)}s"
         )
         log.event(
-            "Code agent artifacts: "
-            f"stdout={stdout_path}, stderr={stderr_path}, result={result_path}"
+            "Codex artifacts: "
+            f"stdout={paths.stdout_path}, stderr={paths.stderr_path}, "
+            f"result={paths.result_path}"
         )
 
         try:
             stdout, returncode = self._run_streaming_process(
                 command=command,
                 prompt=prompt,
-                stdout_path=stdout_path,
-                stderr_path=stderr_path,
-                timeout_seconds=self._effective_timeout(runtime),
+                stdout_path=paths.stdout_path,
+                stderr_path=paths.stderr_path,
+                timeout_seconds=self._effective_timeout(context.runtime),
                 sink=sink,
                 run_id=run.run_id,
             )
         except subprocess.TimeoutExpired as exc:
             stdout = _timeout_output(exc)
-            error = f"Codex timed out after {self._effective_timeout(runtime)}s"
-            self.store.mark_run_failed(run.run_id, error)
+            error = f"Codex timed out after {self._effective_timeout(context.runtime)}s"
             log.fail(error)
             _emit_agent_event(
                 sink,
-                CodeAgentEvent(
+                AgentEvent(
                     run_id=run.run_id,
                     kind="error",
                     phase="timeout",
@@ -143,24 +107,24 @@ class CodexAgent:
                     data={"stdout_tail": stdout[-2000:]},
                 ),
             )
-            return CodeAgentResult(
+            return AgentResult(
                 run_id=run.run_id,
                 status="failed",
                 response_text=error,
-                session_id=conversation.agent_session_id,
-                result_path=result_path,
+                session_id=context.conversation.agent_session_id,
+                result_path=paths.result_path,
+                error=error,
             )
 
-        stderr = _read_text_if_exists(stderr_path)
+        stderr = _read_text_if_exists(paths.stderr_path)
         log.event(f"Codex CLI exited: code={returncode}")
 
         if returncode != 0:
             error = _summarize_failure(stderr, stdout)
-            self.store.mark_run_failed(run.run_id, error)
             log.fail(f"Codex CLI failed: run={run.run_id}")
             _emit_agent_event(
                 sink,
-                CodeAgentEvent(
+                AgentEvent(
                     run_id=run.run_id,
                     kind="error",
                     phase="failed",
@@ -168,52 +132,47 @@ class CodexAgent:
                     data={"returncode": returncode},
                 ),
             )
-            return CodeAgentResult(
+            return AgentResult(
                 run_id=run.run_id,
                 status="failed",
                 response_text=error,
-                session_id=conversation.agent_session_id,
-                result_path=result_path,
+                session_id=context.conversation.agent_session_id,
+                result_path=paths.result_path,
+                error=error,
             )
 
-        session_id = conversation.agent_session_id or _detect_new_session_id(
+        session_id = context.conversation.agent_session_id or _detect_new_session_id(
             before_sessions=before_sessions,
             stdout=stdout,
         )
-        response_text = _read_result_text(result_path, stdout)
+        response_text = _read_result_text(paths.result_path, stdout)
         if session_id:
             log.ok(f"Codex thread ready: {session_id}")
         else:
             log.warn(
                 "Codex thread id was not detected; next message will start a new thread"
             )
-        log.ok(f"Codex result loaded: {result_path} ({len(response_text)} chars)")
-        self.store.mark_run_succeeded(
-            run.run_id,
-            response_text=response_text,
-            result_path=result_path,
-            session_id=session_id,
-        )
+        log.ok(f"Codex result loaded: {paths.result_path} ({len(response_text)} chars)")
         _emit_agent_event(
             sink,
-            CodeAgentEvent(
+            AgentEvent(
                 run_id=run.run_id,
                 kind="final",
                 phase="finished",
-                message=_shorten(response_text, 1200),
+                message=_truncate_markdown(response_text, 2500),
                 data={
                     "status": "succeeded",
                     "session_id": session_id,
-                    "result_path": str(result_path),
+                    "result_path": str(paths.result_path),
                 },
             ),
         )
-        return CodeAgentResult(
+        return AgentResult(
             run_id=run.run_id,
             status="succeeded",
             response_text=response_text,
             session_id=session_id,
-            result_path=result_path,
+            result_path=paths.result_path,
         )
 
     def _run_streaming_process(
@@ -224,7 +183,7 @@ class CodexAgent:
         stdout_path: Path,
         stderr_path: Path,
         timeout_seconds: int,
-        sink: CodeAgentEventSink,
+        sink: AgentEventSink,
         run_id: str,
     ) -> tuple[str, int]:
         stdout_lines: list[str] = []
@@ -303,13 +262,14 @@ class CodexAgent:
         *,
         session_id: str | None,
         result_path: Path,
-        agent_settings: CodeAgentSettings,
+        agent_settings: AgentSettings,
         runtime: Any,
     ) -> list[str]:
         command = [self.settings.codex.bin, "exec"]
         if session_id:
             command.extend(["resume", "--json", "-o", str(result_path)])
             self._append_runtime_options(command, agent_settings)
+            self._append_mcp_server(command)
             command.extend([session_id, "-"])
             return command
 
@@ -325,13 +285,14 @@ class CodexAgent:
             ]
         )
         self._append_runtime_options(command, agent_settings)
+        self._append_mcp_server(command)
         command.append("-")
         return command
 
     def _append_runtime_options(
         self,
         command: list[str],
-        agent_settings: CodeAgentSettings,
+        agent_settings: AgentSettings,
     ) -> None:
         model = self._effective_model(agent_settings)
         if model:
@@ -340,10 +301,19 @@ class CodexAgent:
         if reasoning:
             command.extend(["-c", f'model_reasoning_effort="{reasoning}"'])
 
-    def _effective_model(self, agent_settings: CodeAgentSettings) -> str | None:
+    def _append_mcp_server(self, command: list[str]) -> None:
+        url = f"http://{self.settings.mcp.host}:{self.settings.mcp.port}/mcp"
+        command.extend(
+            [
+                "-c",
+                f'mcp_servers.pkuclaw_channel_tools.url="{url}"',
+            ]
+        )
+
+    def _effective_model(self, agent_settings: AgentSettings) -> str | None:
         return agent_settings.model or self.settings.codex.model
 
-    def _effective_reasoning(self, agent_settings: CodeAgentSettings) -> str | None:
+    def _effective_reasoning(self, agent_settings: AgentSettings) -> str | None:
         if agent_settings.reasoning_effort:
             return agent_settings.reasoning_effort
         return {
@@ -358,64 +328,6 @@ class CodexAgent:
     def _effective_timeout(self, runtime: Any) -> int:
         return runtime.codex.timeout_seconds or self.settings.codex.timeout_seconds
 
-    def _build_prompt(
-        self,
-        *,
-        run: RunRecord,
-        plan: TaskPlan,
-        run_dir: Path,
-        runtime: Any,
-        agent_settings: CodeAgentSettings,
-    ) -> str:
-        capabilities = render_capabilities(plan.capability_names)
-        recent = self.store.recent_runs(conversation_id=run.conversation_id, limit=5)
-        recent_lines = [
-            f"- {item.created_at} [{item.intent}/{item.status}] {item.user_text[:80]}"
-            for item in recent
-            if item.run_id != run.run_id
-        ]
-        recent_text = "\n".join(recent_lines) or "- none"
-
-        return f"""# PkuClaw Code Agent Task
-
-You are being invoked by the PkuClaw backend core loop, not directly by a chat user.
-
-## Code Agent
-
-{self.name}
-
-## Selected Intent
-
-{plan.intent}
-
-## Code Agent Settings
-
-- Provider: `{agent_settings.provider}`
-- Mode: `{agent_settings.mode}`
-- Model: `{self._effective_model(agent_settings) or "default"}`
-- Reasoning effort: `{self._effective_reasoning(agent_settings) or "default"}`
-- Runtime config: `{runtime.path}`
-
-## Available Runtime Facts
-
-- Repository root: `{self.repo_root}`
-- Run directory: `{run_dir}`
-- Teaching snapshots directory: `{self.settings.app.data_dir / "snapshots"}`
-- Feishu/Web/WeChat I/O is owned by channel adapters, not by this code agent.
-- Homework submission requires explicit backend confirmation.
-
-## Recent Conversation Runs
-
-{recent_text}
-
-## Backend Capability Contracts
-
-{capabilities}
-
-## User Message
-
-{run.user_text}
-"""
 
 
 def _read_session_index() -> list[dict[str, Any]]:
@@ -434,26 +346,26 @@ def _read_session_index() -> list[dict[str, Any]]:
 
 
 def _emit_agent_event(
-    sink: CodeAgentEventSink,
-    event: CodeAgentEvent,
+    sink: AgentEventSink,
+    event: AgentEvent,
 ) -> None:
     try:
         sink.emit(event)
     except Exception as exc:  # pragma: no cover - defensive channel isolation
-        log.warn(f"code-agent event sink failed: {exc}")
+        log.warn(f"agent event sink failed: {exc}")
 
 
 def _codex_json_line_to_agent_event(
     run_id: str,
     line: str,
-) -> CodeAgentEvent | None:
+) -> AgentEvent | None:
     try:
         data = json.loads(line)
     except json.JSONDecodeError:
         text = line.strip()
         if not text:
             return None
-        return CodeAgentEvent(
+        return AgentEvent(
             run_id=run_id,
             kind="output",
             phase="output",
@@ -469,10 +381,11 @@ def _codex_json_line_to_agent_event(
         or data.get("kind")
         or "codex_event"
     )
-    phase = _phase_from_codex_event_type(event_type)
+    item_type = _codex_item_type(data)
+    phase = _phase_from_codex_event_type(event_type, item_type=item_type)
     command = _find_key_recursive(data, {"command"})
     if isinstance(command, str) and command.strip():
-        return CodeAgentEvent(
+        return AgentEvent(
             run_id=run_id,
             kind="progress",
             phase="command",
@@ -482,7 +395,7 @@ def _codex_json_line_to_agent_event(
 
     tool_name = _find_key_recursive(data, {"tool_name", "toolName", "name"})
     if isinstance(tool_name, str) and "tool" in event_type.lower():
-        return CodeAgentEvent(
+        return AgentEvent(
             run_id=run_id,
             kind="progress",
             phase="tool",
@@ -490,14 +403,23 @@ def _codex_json_line_to_agent_event(
             data={"codex_type": event_type},
         )
 
-    text = _find_key_recursive(data, {"text", "message", "content"})
+    text = _find_key_recursive(data, {"delta", "text", "message", "content"})
     if isinstance(text, str) and text.strip():
-        kind = "output" if phase == "output" else "progress"
-        return CodeAgentEvent(
+        kind = "output" if _is_codex_assistant_output(event_type, item_type) else "progress"
+        message = (
+            _truncate_output_text(
+                text,
+                1200,
+                preserve_edges="delta" in event_type.lower(),
+            )
+            if kind == "output"
+            else _shorten(text.strip(), 500)
+        )
+        return AgentEvent(
             run_id=run_id,
             kind=kind,
             phase=phase,
-            message=_shorten(text.strip(), 500),
+            message=message,
             data={"codex_type": event_type},
         )
 
@@ -506,7 +428,7 @@ def _codex_json_line_to_agent_event(
         "turn_started": "Codex started a turn.",
         "turn_completed": "Codex completed a turn.",
     }.get(event_type, f"Codex event: {event_type}")
-    return CodeAgentEvent(
+    return AgentEvent(
         run_id=run_id,
         kind="progress",
         phase=phase,
@@ -515,7 +437,32 @@ def _codex_json_line_to_agent_event(
     )
 
 
-def _phase_from_codex_event_type(event_type: str) -> str:
+def _codex_item_type(data: dict[str, Any]) -> str:
+    item = data.get("item")
+    if not isinstance(item, dict):
+        return ""
+    return str(item.get("type") or "")
+
+
+def _is_codex_assistant_output(event_type: str, item_type: str) -> bool:
+    lowered_event = event_type.lower()
+    lowered_item = item_type.lower()
+    return (
+        "agent_message" in lowered_event
+        or lowered_item == "agent_message"
+        or "assistant_message" in lowered_event
+        or lowered_item == "assistant_message"
+        or "output" in lowered_event
+        or "text" in lowered_event
+    )
+
+
+def _phase_from_codex_event_type(event_type: str, *, item_type: str = "") -> str:
+    lowered_item = item_type.lower()
+    if lowered_item == "agent_message":
+        return "output"
+    if lowered_item == "command_execution":
+        return "command"
     lowered = event_type.lower()
     if "session" in lowered:
         return "session"
@@ -555,6 +502,20 @@ def _shorten(text: str, limit: int) -> str:
     if len(compact) <= limit:
         return compact
     return compact[:limit].rstrip() + "..."
+
+
+def _truncate_markdown(text: str, limit: int) -> str:
+    content = text.strip()
+    if len(content) <= limit:
+        return content
+    return content[:limit].rstrip() + "\n..."
+
+
+def _truncate_output_text(text: str, limit: int, *, preserve_edges: bool) -> str:
+    content = text if preserve_edges else text.strip()
+    if len(content) <= limit:
+        return content
+    return content[:limit].rstrip() + "\n..."
 
 
 def _detect_new_session_id(

@@ -21,7 +21,7 @@ class TeachingBackbone:
     """Deterministic teaching-network collector.
 
     This layer is intentionally not agentic. It calls pku3b, stores raw
-    snapshots, and leaves reasoning/summarization to code agents.
+    snapshots, and leaves reasoning/summarization to agents.
     """
 
     def __init__(self, *, pku3b: Pku3b, snapshot_dir: Path) -> None:

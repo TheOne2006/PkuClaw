@@ -20,19 +20,20 @@ class CoreDispatch:
     reply_text: str
     run_id: str | None = None
     plan: "TaskPlan | None" = None
+    agent_request: "AgentRunRequest | None" = None
     handled_locally: bool = False
 
 
 @dataclass(frozen=True)
 class TaskPlan:
     intent: str
-    capability_names: tuple[str, ...]
+    skill_names: tuple[str, ...]
     ack: str
-    requires_code_agent: bool = True
+    requires_agent: bool = True
 
 
 @dataclass(frozen=True)
-class CodeAgentSettings:
+class AgentSettings:
     provider: str | None = None
     mode: str | None = None
     model: str | None = None
@@ -40,16 +41,30 @@ class CodeAgentSettings:
 
 
 @dataclass(frozen=True)
-class CodeAgentResult:
+class AgentRunRequest:
+    source: str
+    conversation_id: str
+    text: str
+    intent: str
+    skill_names: tuple[str, ...]
+    channel: str | None = None
+    sender_id: str | None = None
+    channel_context: dict[str, Any] = field(default_factory=dict)
+    sink_mode: str = "streaming"
+
+
+@dataclass(frozen=True)
+class AgentResult:
     run_id: str
     status: str
     response_text: str
     session_id: str | None
     result_path: Path
+    error: str | None = None
 
 
 @dataclass(frozen=True)
-class CodeAgentEvent:
+class AgentEvent:
     run_id: str
     kind: str
     message: str
@@ -57,16 +72,16 @@ class CodeAgentEvent:
     data: dict[str, Any] = field(default_factory=dict)
 
 
-class CodeAgentEventSink(Protocol):
-    def emit(self, event: CodeAgentEvent) -> None:
-        """Receive a structured, channel-neutral code-agent event."""
+class AgentEventSink(Protocol):
+    def emit(self, event: AgentEvent) -> None:
+        """Receive a structured, channel-neutral agent event."""
 
 
 def merge_agent_settings(
-    defaults: CodeAgentSettings,
-    overrides: CodeAgentSettings,
-) -> CodeAgentSettings:
-    return CodeAgentSettings(
+    defaults: AgentSettings,
+    overrides: AgentSettings,
+) -> AgentSettings:
+    return AgentSettings(
         provider=overrides.provider or defaults.provider or "codex",
         mode=overrides.mode or defaults.mode or "standard",
         model=overrides.model or defaults.model,

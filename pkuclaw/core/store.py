@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
-from pkuclaw.core.models import CodeAgentSettings
+from pkuclaw.core.models import AgentSettings
 
 
 def utc_now() -> str:
@@ -21,7 +21,7 @@ def utc_now() -> str:
 class Conversation:
     conversation_id: str
     agent_session_id: str | None
-    agent_settings: CodeAgentSettings
+    agent_settings: AgentSettings
     created_at: str
     updated_at: str
 
@@ -304,7 +304,7 @@ class Store:
             conn.execute(
                 """
                 insert into artifacts(run_id, kind, path, title, created_at)
-                values (?, 'code_agent_result', ?, 'Code agent result', ?)
+                values (?, 'agent_result', ?, 'Agent result', ?)
                 """,
                 (run_id, str(result_path), now),
             )
@@ -320,6 +320,33 @@ class Store:
                 """,
                 (error, now, now, run_id),
             )
+
+    def update_run_metadata(self, run_id: str, metadata: dict[str, Any]) -> None:
+        current = self.get_run_metadata(run_id)
+        current.update(metadata)
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                update runs
+                set metadata_json = ?, updated_at = ?
+                where run_id = ?
+                """,
+                (json.dumps(current, ensure_ascii=False), utc_now(), run_id),
+            )
+
+    def get_run_metadata(self, run_id: str) -> dict[str, Any]:
+        with self._connect() as conn:
+            row = conn.execute(
+                "select metadata_json from runs where run_id = ?",
+                (run_id,),
+            ).fetchone()
+        if row is None:
+            raise KeyError(f"run not found: {run_id}")
+        try:
+            data = json.loads(str(row["metadata_json"] or "{}"))
+        except json.JSONDecodeError:
+            return {}
+        return data if isinstance(data, dict) else {}
 
     def record_channel_message(
         self,
@@ -416,7 +443,7 @@ def _conversation_from_row(row: sqlite3.Row) -> Conversation:
     return Conversation(
         conversation_id=str(row["chat_id"]),
         agent_session_id=row["agent_session_id"],
-        agent_settings=CodeAgentSettings(
+        agent_settings=AgentSettings(
             provider=_optional_row_str(row["agent_provider"]),
             mode=_optional_row_str(row["agent_mode"]),
             model=row["agent_model"],

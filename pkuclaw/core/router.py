@@ -4,20 +4,20 @@ from pkuclaw.core.models import TaskPlan
 
 
 def classify_message(text: str) -> TaskPlan:
-    """Classify natural language only enough to pick backend capabilities."""
+    """Classify natural language only enough to pick PkuClaw sub-skills."""
     cleaned = text.strip()
     lowered = cleaned.lower()
 
     if _contains_any(lowered, ("笔记", "讲义", "notes", "note", "lecture", "继续笔记")):
         return TaskPlan(
             intent="notes",
-            capability_names=("notes.write",),
+            skill_names=("tasks/write-notes.md",),
             ack="收到，我会按笔记工作流启动 Code Agent。",
         )
     if _contains_any(lowered, ("作业", "homework", "hw", "习题", "提交", "解答")):
         return TaskPlan(
             intent="homework",
-            capability_names=("homework.plan",),
+            skill_names=("tasks/do-homework.md",),
             ack="收到，我会按作业 dry-run 工作流启动 Code Agent。",
         )
     if _contains_any(
@@ -36,12 +36,12 @@ def classify_message(text: str) -> TaskPlan:
     ):
         return TaskPlan(
             intent="sync",
-            capability_names=("notice.summarize",),
+            skill_names=("tasks/sync-notices.md",),
             ack="收到，我会按课程通知/DDL 工作流启动 Code Agent。",
         )
     return TaskPlan(
         intent="general",
-        capability_names=(),
+        skill_names=(),
         ack="收到，我交给 Code Agent 处理。",
     )
 

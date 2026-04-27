@@ -9,11 +9,7 @@ app_id = "cli_xxx"
 app_secret_env = "FEISHU_APP_SECRET"
 event_mode = "websocket"
 
-[pku3b]
-bin = "crates/pku3b/target/debug/pku3b"
-source_dir = "crates/pku3b"
-
-[code_agent]
+[agent]
 provider = "codex"
 
 [codex]
@@ -29,3 +25,7 @@ enable_assignments = true
 enable_announcements = true
 enable_replays = true
 enable_grades = false
+
+[mcp]
+host = "127.0.0.1"
+port = 8765
