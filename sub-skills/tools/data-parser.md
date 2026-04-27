@@ -1,5 +1,5 @@
 ---
-name: autopku-tool-data-parser
+name: pkuclaw-tool-data-parser
 description: 解析 pku3b 输出数据（ANSI颜色码处理、作业提取、课程筛选）
 ---
 

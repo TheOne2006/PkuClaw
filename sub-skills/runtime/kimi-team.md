@@ -1,5 +1,5 @@
 ---
-name: autopku-runtime-kimi
+name: pkuclaw-runtime-kimi
 description: Kimi Code CLI Agent Team 运行时接口
 ---
 

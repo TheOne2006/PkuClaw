@@ -1,21 +1,21 @@
 <p align="center">
-  <img src="images/icon.png" alt="AutoPku Logo" width="120">
+  <img src="images/icon.png" alt="PkuClaw Logo" width="120">
 </p>
 
-<h1 align="center">AutoPku</h1>
+<h1 align="center">PkuClaw</h1>
 
 <p align="center">
-  <strong>北京大学本科全自动解决方案</strong><br>
-  从通知获取到作业提交，全程 Agent Team 托管
+  <strong>面向 PKU 学习流的个人 AI Agent 网关</strong><br>
+  从课程通知、笔记到作业流程，用 Codex/Agent Team 托管
 </p>
 
 <p align="center">
-  <a href="https://autopku.com" target="_blank">📖 Autopku.com</a>
+  <a href="https://github.com/TheOne2006/PkuClaw" target="_blank">GitHub</a>
   ·
-  <a href="https://github.com/ICUlizhi/AutoPku" target="_blank">🐙 GitHub</a>
+  <a href="https://github.com/ICUlizhi/AutoPku" target="_blank">Upstream AutoPku</a>
 </p>
 
-<p align="center"><strong>只需学号密码 → AI 自动完成一切</strong></p>
+<p align="center"><strong>把 PKU 教学网流程接成一个可轮值、可对话、可扩展的 AI 助手</strong></p>
 
 <p align="center">
   <img src="images/pipeline.png" alt="pipeline" width="80%">
@@ -29,7 +29,7 @@
 
 打开 cc / codex / kimi code, 并告诉他：
 ```
-下载 https://github.com/ICUlizhi/AutoPku，并执行这个skill
+下载 https://github.com/TheOne2006/PkuClaw，并执行这个 skill
 ```
 祂会自行下载 pku3b，理解你的工作目录，完成各种配置...
 ### 第二步：下达命令
@@ -66,10 +66,10 @@
 ##  Introduction
 
 
-本项目最初基于 Claude Code 的实验性 Agent Team 功能实现。现在仓库同时保留：
+本项目从 AutoPku 私有化演进而来，最初基于 Claude Code 的实验性 Agent Team 功能实现。现在仓库同时保留：
 
 - 根目录 `skill.md`：Claude Code 入口
-- `codex/autopku/SKILL.md`：Codex 入口
+- `codex/pkuclaw/SKILL.md`：Codex 入口
 
 我没有选择自建一套 Agent 系统，而是将全部领域逻辑（教学网登录 via pku3b、PDF 解析策略、LaTeX 渲染管线、教学网提交协议等）内嵌在 skill 文件中。原因是：
 - **由一体化 Agentic RL 训练出的 Claude Code，工具调用被蒸馏回了模型参数，且涌现出了人类炼丹师想不到的pattern, 其内置的能力远优于手工搭建的 Agent 框架**。
@@ -189,7 +189,7 @@ test/简明量子力学/C
 ## Agent Team 结构 （单课程）
 
 ```
-Team: autopku-team
+Team: pkuclaw-team
 │
 ├── coordinator (协调者)
 │   └── 分配任务，汇总结果
@@ -229,5 +229,4 @@ Team: autopku-team
 - 目前兼容的作业类型不够多，后期希望加载更多 skill 例如 pptx 绘制，欢迎提 pr. 
 
 ---
-
 

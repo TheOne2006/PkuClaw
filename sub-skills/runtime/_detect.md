@@ -1,5 +1,5 @@
 ---
-name: autopku-runtime-detect
+name: pkuclaw-runtime-detect
 description: 检测当前运行的 AI 环境（Claude Code / Codex / Kimi / Other）
 ---
 

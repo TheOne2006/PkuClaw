@@ -1,5 +1,5 @@
 ---
-name: autopku-task-do-homework
+name: pkuclaw-task-do-homework
 description: 完成PKU课程作业（解析→解答→渲染→询问用户→提交）
 ---
 

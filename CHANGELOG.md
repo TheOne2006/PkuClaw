@@ -1,4 +1,4 @@
-# AutoPku 演进历程
+# PkuClaw 演进历程
 
 > 从第一版单文件 skill 到模块化、多运行时、自然语言驱动的学业自动化系统
 
@@ -44,7 +44,7 @@
 **Commits:** `9588521` → `339049f` (PR #2)
 
 - **约束**：macOS 默认文件系统大小写不敏感，根目录 `skill.md` 和 `SKILL.md` 无法共存
-- **方案**：保留 Claude 入口 `skill.md`，新增 `codex/autopku/SKILL.md`
+- **方案**：保留 Claude 入口 `skill.md`，新增 `codex/pkuclaw/SKILL.md`
 - 使 Codex skill 自包含（不依赖仓库根目录的相对链接）
 - 验证 `pku3b` 本地行为：修正 `s -d major show` 不稳定（返回 302）的问题
 - 最终合并 PR #2，仓库可同时服务 Claude Code 和 Codex 两个环境
@@ -109,7 +109,7 @@ sub-skills/
 **Commit:** `b118918`
 
 - 新增 `sub-skills/tasks/write-notes.md`
-- 支持 `autopku notes <course>` 自然语言指令
+- 支持 `pkuclaw notes <course>` 自然语言指令
 - 聚焦数学核心内容：定义、定理、证明
 - 去除噪声：历史背景、故事轶事、无关例子
 - 生成带 LaTeX 公式和索引的 Markdown 笔记

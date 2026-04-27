@@ -1,5 +1,5 @@
 ---
-name: autopku-runtime-codex
+name: pkuclaw-runtime-codex
 description: Codex Native Subagent 运行时接口
 ---
 

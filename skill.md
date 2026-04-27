@@ -1,9 +1,9 @@
 ---
-name: autopku
-description: AutoPku - 自动获取PKU课程通知、完成作业、撰写笔记
+name: pkuclaw
+description: PkuClaw - 自动获取 PKU 课程通知、完成作业、撰写笔记，并作为个人 AI Agent 网关扩展
 ---
 
-# AutoPku
+# PkuClaw
 
 自动处理北京大学课程相关任务：同步通知、完成作业、撰写笔记。
 

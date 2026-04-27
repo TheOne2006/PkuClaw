@@ -1,5 +1,5 @@
 ---
-name: autopku-runtime-create-agent
+name: pkuclaw-runtime-create-agent
 description: 统一的 Agent 创建接口，自动适配当前 AI 环境
 ---
 

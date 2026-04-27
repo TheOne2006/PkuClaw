@@ -1,5 +1,5 @@
 ---
-name: autopku-task-sync-notices
+name: pkuclaw-task-sync-notices
 description: 同步PKU课程通知，为每门课程创建目录结构和摘要
 ---
 
@@ -96,7 +96,7 @@ report = f"""# PKU 课程通知汇总
 - 总作业：{len(assignments)}
 - 待交：{sum(1 for a in assignments if '已完成' not in a['status'])}
 
-*由 AutoPku 自动生成*
+*由 PkuClaw 自动生成*
 """
 
 with open(f'{base_dir}/通知摘要汇总.md', 'w') as f:

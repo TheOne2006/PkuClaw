@@ -1,5 +1,5 @@
 ---
-name: autopku-runtime-claude
+name: pkuclaw-runtime-claude
 description: Claude Code Agent Team 运行时接口
 ---
 

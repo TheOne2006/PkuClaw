@@ -1,5 +1,5 @@
 ---
-name: autopku-tool-pku3b-setup
+name: pkuclaw-tool-pku3b-setup
 description: PKU教学网工具 pku3b 的安装、配置和登录
 ---
 

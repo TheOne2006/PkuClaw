@@ -1,5 +1,5 @@
 ---
-name: autopku-tool-agent-helpers
+name: pkuclaw-tool-agent-helpers
 description: Agent Prompt 模板和 Agent Team 协调工具
 ---
 
