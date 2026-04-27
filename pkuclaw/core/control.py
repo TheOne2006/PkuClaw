@@ -1,0 +1,55 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+
+MODE_LABELS = {
+    "fast": "Fast",
+    "standard": "Standard",
+    "deep": "Deep",
+}
+
+
+@dataclass(frozen=True)
+class ControlCommand:
+    kind: str
+    value: str | None = None
+
+
+def parse_control_command(
+    *,
+    text: str = "",
+    event_key: str | None = None,
+) -> ControlCommand | None:
+    key = (event_key or "").strip().lower()
+    if key:
+        if key in {"mode:fast", "pkuclaw.mode.fast"}:
+            return ControlCommand("set_mode", "fast")
+        if key in {"mode:standard", "pkuclaw.mode.standard"}:
+            return ControlCommand("set_mode", "standard")
+        if key in {"mode:deep", "pkuclaw.mode.deep"}:
+            return ControlCommand("set_mode", "deep")
+        if key in {"status", "status:current", "pkuclaw.status"}:
+            return ControlCommand("status")
+        if key in {"runs:recent", "pkuclaw.runs.recent"}:
+            return ControlCommand("recent_runs")
+
+    normalized = text.strip().lower().replace(" ", "")
+    if not normalized:
+        return None
+
+    if normalized in {"fast", "fast模式", "切换fast模式", "开启fast模式"}:
+        return ControlCommand("set_mode", "fast")
+    if normalized in {"standard", "标准", "标准模式", "切换标准模式"}:
+        return ControlCommand("set_mode", "standard")
+    if normalized in {"deep", "深度", "深度模式", "切换深度模式"}:
+        return ControlCommand("set_mode", "deep")
+    if normalized in {"状态", "查看状态", "当前状态", "查看当前状态", "当前会话设置"}:
+        return ControlCommand("status")
+    if normalized in {"最近任务", "查看最近任务", "列出最近任务"}:
+        return ControlCommand("recent_runs")
+    return None
+
+
+def mode_label(mode: str) -> str:
+    return MODE_LABELS.get(mode, mode)

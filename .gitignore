@@ -1,50 +1,26 @@
-# PkuClaw Gitignore
-
-# 用户数据（自动生成的课程文件夹）
-*/
-!/.gitignore
-!/LICENSE
-!/README.md
-!/skill.md
-!/pyproject.toml
-!/configs/
-!/configs/**/
-!/configs/**/*
-!/pkuclaw/
-!/pkuclaw/**/
-!/pkuclaw/**/*
-!/scripts/
-!/scripts/**/
-!/scripts/**/*
-!/sub-skills/
-!/sub-skills/**/
-!/sub-skills/**/*
-!/codex/
-!/codex/**/
-!/codex/**/*
-!/images
-!/crates/
-!/crates/**/
-!/crates/**/*
-crates/*/target/
-archive/
-# docs/ 在 main 分支被忽略，文档网站托管在独立的 docs 分支
-docs/
-# 汇总报告（自动生成）
-通知摘要汇总.md
-
-# Local secrets and runtime state
+# Local secrets
 .env
 .env.*
 !.env.example
+configs/config.toml
+
+# Runtime state
 data/
 logs/
 tmp/
-
-# OS
-.DS_Store
-Thumbs.db
+.codex
 
 # Python
+.venv/
 __pycache__/
 *.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Rust
+crates/*/target/
+
+# OS/editor
+.DS_Store
+Thumbs.db

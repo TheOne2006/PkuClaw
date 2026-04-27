@@ -12,6 +12,13 @@ event_mode = "websocket"
 bin = "crates/pku3b/target/debug/pku3b"
 source_dir = "crates/pku3b"
 
+[codex]
+bin = "codex"
+sandbox = "workspace-write"
+model = ""
+timeout_seconds = 1800
+max_concurrent_runs = 1
+
 [monitor]
 scan_interval_seconds = 900
 enable_assignments = true

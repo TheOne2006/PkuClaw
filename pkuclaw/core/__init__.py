@@ -1,1 +1,1 @@
-"""Core state, events, jobs, and routing."""
+"""Core loop, state, controls, and routing."""

@@ -1,90 +1,37 @@
-# PkuClaw Architecture
+# Architecture
 
-PkuClaw is moving from a prompt/skill repository into a long-running course
-agent service. The intended split is:
+PkuClaw is a multi-entry backend with a deterministic data backbone and an
+agentic worker layer.
 
-- Python owns the CLI, scheduler, local state, Feishu gateway, and workflow
-  orchestration.
-- Rust owns low-level course access through the internal `pku3b` crate.
-- Codex workers handle heavy reasoning tasks such as notes, homework review,
-  summaries, and document generation.
-
-## Current Folder Layout
+## Runtime Boundaries
 
 ```text
-PkuClaw/
-├── ARCHITECTURE.md
-├── README.md
-├── skill.md
-├── pyproject.toml
-├── configs/
-│   └── config.example.toml
-├── crates/
-│   └── pku3b/
-│       ├── Cargo.toml
-│       ├── Cargo.lock
-│       ├── README.md
-│       ├── build.rs
-│       ├── assets/
-│       └── src/
-│           ├── config.rs
-│           ├── http.rs
-│           ├── main.rs
-│           ├── multipart.rs
-│           ├── pdf.rs
-│           ├── qs.rs
-│           ├── ttshitu.rs
-│           ├── utils.rs
-│           └── walkdir.rs
-├── pkuclaw/
-│   ├── __init__.py
-│   ├── cli.py
-│   ├── channels/
-│   │   ├── __init__.py
-│   │   └── feishu.py
-│   ├── connectors/
-│   │   ├── __init__.py
-│   │   └── pku3b.py
-│   ├── core/
-│   │   ├── __init__.py
-│   │   ├── events.py
-│   │   ├── jobs.py
-│   │   └── router.py
-│   ├── workflows/
-│   │   ├── __init__.py
-│   │   ├── notes.py
-│   │   └── sync.py
-│   └── workers/
-│       ├── __init__.py
-│       └── codex.py
-├── scripts/
-│   └── feishu_smoke.py
-├── sub-skills/
-│   ├── runtime/
-│   ├── tasks/
-│   └── tools/
+Feishu / Web / WeChat
+        |
+        v
+Channel adapter
+        |
+        v
+CoreLoop
+  - local controls
+  - conversation state
+  - task routing
+  - run records
+  - worker dispatch
+        |
+        +--> TeachingBackbone -> pku3b -> snapshots
+        |
+        +--> CodexWorker -> codex exec/resume -> artifacts
 ```
 
-## Runtime Loops
+## Design Rules
 
-```text
-Monitor loop
-  pku3b/course.pku scans -> snapshots -> diff -> events -> notifications
-
-Chat loop
-  Feishu message -> router -> course state / workflow / Codex worker -> reply
-
-Agent loop
-  queued jobs -> Codex worker -> artifacts -> job state -> Feishu push
-```
-
-## Near-Term Commands
-
-```bash
-pkuclaw doctor
-pkuclaw sync
-pkuclaw status
-pkuclaw daemon
-pkuclaw bot feishu
-pkuclaw notes "课程名"
-```
+- Channel adapters translate platform events into `ChannelMessage` and send
+  replies. They do not own business logic.
+- CoreLoop owns product behavior: modes, status, routing, and run creation.
+- TeachingBackbone owns scheduled course-data collection. It is ordinary
+  backend code, not an agent.
+- CodexWorker only handles slow reasoning and artifact generation. It receives
+  capability contracts from Python, not loose repository skills.
+- `crates/pku3b` remains the teaching-network engine and can evolve with this
+  backend.
