@@ -1,4 +1,4 @@
-"""Capability contracts exposed to Codex workers."""
+"""Capability contracts exposed to code-agent adapters."""
 
 from pkuclaw.capabilities.registry import Capability, render_capabilities, select_capabilities
 

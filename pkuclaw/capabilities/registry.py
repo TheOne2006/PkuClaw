@@ -14,7 +14,7 @@ class Capability:
 CAPABILITIES: dict[str, Capability] = {
     "resident": Capability(
         name="resident",
-        description="Operate as the reasoning worker behind PkuClaw's core loop.",
+        description="Operate as the code agent behind PkuClaw's core loop.",
         instructions=(
             "You are invoked by PkuClaw backend code, not directly by the chat "
             "user. Keep responses concise, mention produced artifacts, and ask a "
@@ -63,10 +63,20 @@ CAPABILITIES: dict[str, Capability] = {
             "uncertain items marked as uncertain."
         ),
     ),
+    "runtime.config.edit": Capability(
+        name="runtime.config.edit",
+        description="Edit PkuClaw's agent-editable runtime configuration.",
+        instructions=(
+            "Runtime config lives in configs/runtime/agent.toml and contains no "
+            "secrets. You may propose or make edits there when the user asks to "
+            "change agent behavior. Changes are read by the backend before each "
+            "new message, agent run, or daemon scan."
+        ),
+    ),
 }
 
 
-BASE_CAPABILITY_NAMES = ("resident", "course.snapshot.read")
+BASE_CAPABILITY_NAMES = ("resident", "course.snapshot.read", "runtime.config.edit")
 
 
 def select_capabilities(names: tuple[str, ...]) -> list[Capability]:

@@ -15,6 +15,7 @@ from pkuclaw.config import load_settings
 from pkuclaw.connectors.pku3b import Pku3b
 from pkuclaw.core import logging as log
 from pkuclaw.core.store import Store
+from pkuclaw.runtime_config import RuntimeConfigLoader
 
 app = typer.Typer(help="PkuClaw backend service CLI.")
 bot_app = typer.Typer(help="Channel adapters.")
@@ -80,12 +81,18 @@ def daemon(config: Optional[Path] = typer.Option(None, help="Path to config TOML
         pku3b=Pku3b(settings.pku3b.bin),
         snapshot_dir=settings.app.data_dir / "snapshots",
     )
+    runtime_config = RuntimeConfigLoader(settings.app.runtime_config_dir)
     log.stage("Starting teaching backbone daemon")
-    log.ok(f"scan interval: {settings.monitor.scan_interval_seconds}s")
     while True:
+        runtime = runtime_config.read()
+        scan_interval = (
+            runtime.monitor.scan_interval_seconds
+            or settings.monitor.scan_interval_seconds
+        )
+        log.ok(f"scan interval: {scan_interval}s")
         snapshot = backbone.collect_snapshot()
         log.ok(f"teaching snapshot written: {snapshot.path}")
-        time.sleep(settings.monitor.scan_interval_seconds)
+        time.sleep(scan_interval)
 
 
 @bot_app.command("feishu")

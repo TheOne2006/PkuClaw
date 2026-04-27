@@ -16,6 +16,7 @@ DEFAULT_FEISHU_API_BASE = "https://open.feishu.cn"
 class AppConfig:
     name: str
     data_dir: Path
+    runtime_config_dir: Path
     timezone: str
 
 
@@ -54,6 +55,11 @@ class CodexConfig:
 
 
 @dataclass(frozen=True)
+class CodeAgentConfig:
+    provider: str
+
+
+@dataclass(frozen=True)
 class MonitorConfig:
     scan_interval_seconds: int
     enable_assignments: bool
@@ -68,6 +74,7 @@ class Settings:
     app: AppConfig
     feishu: FeishuConfig
     pku3b: Pku3bConfig
+    code_agent: CodeAgentConfig
     codex: CodexConfig
     monitor: MonitorConfig
 
@@ -80,12 +87,16 @@ def load_settings(config_path: Path | None = None) -> Settings:
     app_raw = _get_section(raw, "app")
     feishu_raw = _get_section(raw, "feishu")
     pku3b_raw = _get_section(raw, "pku3b")
+    code_agent_raw = _get_section(raw, "code_agent")
     codex_raw = _get_section(raw, "codex")
     monitor_raw = _get_section(raw, "monitor")
 
     app = AppConfig(
         name=_read_str(app_raw, "name", default="PkuClaw"),
         data_dir=Path(_read_str(app_raw, "data_dir", default="data")),
+        runtime_config_dir=Path(
+            _read_str(app_raw, "runtime_config_dir", default="configs/runtime")
+        ),
         timezone=_read_str(app_raw, "timezone", default="Asia/Shanghai"),
     )
     feishu = FeishuConfig(
@@ -102,6 +113,9 @@ def load_settings(config_path: Path | None = None) -> Settings:
     pku3b = Pku3bConfig(
         bin=Path(_read_str(pku3b_raw, "bin", default="crates/pku3b/target/debug/pku3b")),
         source_dir=Path(_read_str(pku3b_raw, "source_dir", default="crates/pku3b")),
+    )
+    code_agent = CodeAgentConfig(
+        provider=_read_str(code_agent_raw, "provider", default="codex").lower(),
     )
     codex = CodexConfig(
         bin=_read_str(codex_raw, "bin", default="codex"),
@@ -130,6 +144,7 @@ def load_settings(config_path: Path | None = None) -> Settings:
         app=app,
         feishu=feishu,
         pku3b=pku3b,
+        code_agent=code_agent,
         codex=codex,
         monitor=monitor,
     )

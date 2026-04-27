@@ -1,6 +1,7 @@
 [app]
 name = "PKU Course Bot"
 data_dir = "data"
+runtime_config_dir = "configs/runtime"
 timezone = "Asia/Shanghai"
 
 [feishu]
@@ -11,6 +12,9 @@ event_mode = "websocket"
 [pku3b]
 bin = "crates/pku3b/target/debug/pku3b"
 source_dir = "crates/pku3b"
+
+[code_agent]
+provider = "codex"
 
 [codex]
 bin = "codex"

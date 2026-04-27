@@ -4,10 +4,13 @@ import json
 import sqlite3
 import threading
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
+
+from pkuclaw.core.models import CodeAgentSettings
 
 
 def utc_now() -> str:
@@ -17,8 +20,8 @@ def utc_now() -> str:
 @dataclass(frozen=True)
 class Conversation:
     conversation_id: str
-    codex_session_id: str | None
-    mode: str
+    agent_session_id: str | None
+    agent_settings: CodeAgentSettings
     created_at: str
     updated_at: str
 
@@ -37,6 +40,17 @@ class RunRecord:
     finished_at: str | None
 
 
+@dataclass(frozen=True)
+class ChannelMessageRecord:
+    id: int
+    run_id: str
+    channel: str
+    target_id: str
+    external_message_id: str
+    created_at: str
+    updated_at: str
+
+
 class Store:
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
@@ -50,8 +64,11 @@ class Store:
                 """
                 create table if not exists conversations (
                     chat_id text primary key,
-                    codex_session_id text,
-                    mode text not null default 'standard',
+                    agent_session_id text,
+                    agent_provider text,
+                    agent_mode text,
+                    agent_model text,
+                    agent_reasoning_effort text,
                     created_at text not null,
                     updated_at text not null
                 );
@@ -84,13 +101,61 @@ class Store:
                     created_at text not null,
                     foreign key (run_id) references runs(run_id)
                 );
+
+                create table if not exists channel_messages (
+                    id integer primary key autoincrement,
+                    run_id text not null,
+                    channel text not null,
+                    target_id text not null,
+                    external_message_id text not null,
+                    created_at text not null,
+                    updated_at text not null,
+                    unique(run_id, channel, target_id),
+                    foreign key (run_id) references runs(run_id)
+                );
                 """
             )
             _ensure_column(
                 conn,
                 table="conversations",
-                column="mode",
-                definition="text not null default 'standard'",
+                column="agent_provider",
+                definition="text",
+            )
+            _ensure_column(
+                conn,
+                table="conversations",
+                column="agent_mode",
+                definition="text",
+            )
+            _ensure_column(
+                conn,
+                table="conversations",
+                column="agent_model",
+                definition="text",
+            )
+            _ensure_column(
+                conn,
+                table="conversations",
+                column="agent_reasoning_effort",
+                definition="text",
+            )
+            _ensure_column(
+                conn,
+                table="conversations",
+                column="agent_session_id",
+                definition="text",
+            )
+            _copy_column_if_empty(
+                conn,
+                table="conversations",
+                source_column="mode",
+                target_column="agent_mode",
+            )
+            _copy_column_if_empty(
+                conn,
+                table="conversations",
+                source_column="codex_session_id",
+                target_column="agent_session_id",
             )
 
     def ensure_conversation(self, conversation_id: str) -> Conversation:
@@ -102,7 +167,7 @@ class Store:
                 now = utc_now()
                 conn.execute(
                     """
-                    insert into conversations(chat_id, codex_session_id, created_at, updated_at)
+                    insert into conversations(chat_id, agent_session_id, created_at, updated_at)
                     values (?, null, ?, ?)
                     """,
                     (conversation_id, now, now),
@@ -117,22 +182,43 @@ class Store:
             conn.execute(
                 """
                 update conversations
-                set codex_session_id = ?, updated_at = ?
+                set agent_session_id = ?, updated_at = ?
                 where chat_id = ?
                 """,
                 (session_id, utc_now(), conversation_id),
             )
 
-    def set_conversation_mode(self, conversation_id: str, mode: str) -> Conversation:
+    def update_agent_settings(
+        self,
+        conversation_id: str,
+        *,
+        provider: str | None = None,
+        mode: str | None = None,
+        model: str | None = None,
+        reasoning_effort: str | None = None,
+    ) -> Conversation:
         self.ensure_conversation(conversation_id)
+        current = self.ensure_conversation(conversation_id).agent_settings
         with self._lock, self._connect() as conn:
             conn.execute(
                 """
                 update conversations
-                set mode = ?, updated_at = ?
+                set agent_provider = ?, agent_mode = ?, agent_model = ?,
+                    agent_reasoning_effort = ?, updated_at = ?
                 where chat_id = ?
                 """,
-                (mode, utc_now(), conversation_id),
+                (
+                    provider if provider is not None else current.provider,
+                    mode if mode is not None else current.mode,
+                    model if model is not None else current.model,
+                    (
+                        reasoning_effort
+                        if reasoning_effort is not None
+                        else current.reasoning_effort
+                    ),
+                    utc_now(),
+                    conversation_id,
+                ),
             )
         return self.ensure_conversation(conversation_id)
 
@@ -218,7 +304,7 @@ class Store:
             conn.execute(
                 """
                 insert into artifacts(run_id, kind, path, title, created_at)
-                values (?, 'codex_result', ?, 'Codex result', ?)
+                values (?, 'code_agent_result', ?, 'Code agent result', ?)
                 """,
                 (run_id, str(result_path), now),
             )
@@ -234,6 +320,49 @@ class Store:
                 """,
                 (error, now, now, run_id),
             )
+
+    def record_channel_message(
+        self,
+        *,
+        run_id: str,
+        channel: str,
+        target_id: str,
+        external_message_id: str,
+    ) -> None:
+        now = utc_now()
+        with self._lock, self._connect() as conn:
+            conn.execute(
+                """
+                insert into channel_messages(
+                    run_id, channel, target_id, external_message_id,
+                    created_at, updated_at
+                )
+                values (?, ?, ?, ?, ?, ?)
+                on conflict(run_id, channel, target_id) do update set
+                    external_message_id = excluded.external_message_id,
+                    updated_at = excluded.updated_at
+                """,
+                (run_id, channel, target_id, external_message_id, now, now),
+            )
+
+    def get_channel_message(
+        self,
+        *,
+        run_id: str,
+        channel: str,
+        target_id: str,
+    ) -> ChannelMessageRecord | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                select * from channel_messages
+                where run_id = ? and channel = ? and target_id = ?
+                """,
+                (run_id, channel, target_id),
+            ).fetchone()
+        if row is None:
+            return None
+        return _channel_message_from_row(row)
 
     def get_run(self, run_id: str) -> RunRecord:
         with self._connect() as conn:
@@ -270,19 +399,29 @@ class Store:
             row = conn.execute("select count(*) as count from conversations").fetchone()
         return int(row["count"])
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self) -> Iterator[sqlite3.Connection]:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         conn.execute("pragma journal_mode = wal")
         conn.execute("pragma foreign_keys = on")
-        return conn
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
 
 
 def _conversation_from_row(row: sqlite3.Row) -> Conversation:
     return Conversation(
         conversation_id=str(row["chat_id"]),
-        codex_session_id=row["codex_session_id"],
-        mode=str(row["mode"]),
+        agent_session_id=row["agent_session_id"],
+        agent_settings=CodeAgentSettings(
+            provider=_optional_row_str(row["agent_provider"]),
+            mode=_optional_row_str(row["agent_mode"]),
+            model=row["agent_model"],
+            reasoning_effort=row["agent_reasoning_effort"],
+        ),
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
     )
@@ -303,6 +442,24 @@ def _run_from_row(row: sqlite3.Row) -> RunRecord:
     )
 
 
+def _channel_message_from_row(row: sqlite3.Row) -> ChannelMessageRecord:
+    return ChannelMessageRecord(
+        id=int(row["id"]),
+        run_id=str(row["run_id"]),
+        channel=str(row["channel"]),
+        target_id=str(row["target_id"]),
+        external_message_id=str(row["external_message_id"]),
+        created_at=str(row["created_at"]),
+        updated_at=str(row["updated_at"]),
+    )
+
+
+def _optional_row_str(value: Any) -> str | None:
+    if value is None:
+        return None
+    return str(value)
+
+
 def _ensure_column(
     conn: sqlite3.Connection,
     *,
@@ -315,3 +472,23 @@ def _ensure_column(
     if column in existing:
         return
     conn.execute(f"alter table {table} add column {column} {definition}")
+
+
+def _copy_column_if_empty(
+    conn: sqlite3.Connection,
+    *,
+    table: str,
+    source_column: str,
+    target_column: str,
+) -> None:
+    rows = conn.execute(f"pragma table_info({table})").fetchall()
+    existing = {str(row["name"]) for row in rows}
+    if source_column not in existing or target_column not in existing:
+        return
+    conn.execute(
+        f"""
+        update {table}
+        set {target_column} = {source_column}
+        where {target_column} is null and {source_column} is not null
+        """
+    )

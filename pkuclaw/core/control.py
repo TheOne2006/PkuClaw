@@ -21,7 +21,8 @@ def parse_control_command(
     text: str = "",
     event_key: str | None = None,
 ) -> ControlCommand | None:
-    key = (event_key or "").strip().lower()
+    raw_key = (event_key or "").strip()
+    key = raw_key.lower()
     if key:
         if key in {"mode:fast", "pkuclaw.mode.fast"}:
             return ControlCommand("set_mode", "fast")
@@ -29,6 +30,15 @@ def parse_control_command(
             return ControlCommand("set_mode", "standard")
         if key in {"mode:deep", "pkuclaw.mode.deep"}:
             return ControlCommand("set_mode", "deep")
+        if key.startswith("model:"):
+            return ControlCommand("set_model", raw_key.split(":", 1)[1].strip())
+        if key.startswith("reasoning:"):
+            return ControlCommand(
+                "set_reasoning",
+                raw_key.split(":", 1)[1].strip().lower(),
+            )
+        if key in {"agent:codex", "pkuclaw.agent.codex"}:
+            return ControlCommand("set_provider", "codex")
         if key in {"status", "status:current", "pkuclaw.status"}:
             return ControlCommand("status")
         if key in {"runs:recent", "pkuclaw.runs.recent"}:
@@ -44,6 +54,10 @@ def parse_control_command(
         return ControlCommand("set_mode", "standard")
     if normalized in {"deep", "深度", "深度模式", "切换深度模式"}:
         return ControlCommand("set_mode", "deep")
+    if normalized.startswith("模型:") or normalized.startswith("model:"):
+        return ControlCommand("set_model", normalized.split(":", 1)[1].strip())
+    if normalized.startswith("思考强度:") or normalized.startswith("reasoning:"):
+        return ControlCommand("set_reasoning", normalized.split(":", 1)[1].strip())
     if normalized in {"状态", "查看状态", "当前状态", "查看当前状态", "当前会话设置"}:
         return ControlCommand("status")
     if normalized in {"最近任务", "查看最近任务", "列出最近任务"}:

@@ -1,0 +1,12 @@
+[code_agent]
+provider = "codex"
+mode = "standard"
+model = ""
+reasoning_effort = ""
+
+[codex]
+sandbox = "workspace-write"
+timeout_seconds = 1800
+
+[monitor]
+scan_interval_seconds = 900

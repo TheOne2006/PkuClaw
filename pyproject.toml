@@ -1,7 +1,7 @@
 [project]
 name = "pkuclaw"
 version = "0.1.0"
-description = "Backend service for a PKU study assistant with Feishu, pku3b, and Codex workers."
+description = "Backend service for a PKU study assistant with Feishu, pku3b, and code agents."
 requires-python = ">=3.11"
 dependencies = [
   "lark-oapi>=1.4.0",

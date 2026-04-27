@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 from pkuclaw.backbone.teaching import TeachingBackbone
+from pkuclaw.code_agents.base import CodeAgent
 from pkuclaw.core import logging as log
 from pkuclaw.core.control import mode_label, parse_control_command
-from pkuclaw.core.models import ChannelMessage, CoreDispatch, TaskPlan, WorkerResult
+from pkuclaw.core.models import (
+    ChannelMessage,
+    CodeAgentEventSink,
+    CodeAgentResult,
+    CoreDispatch,
+    TaskPlan,
+    merge_agent_settings,
+)
 from pkuclaw.core.router import classify_message
 from pkuclaw.core.store import Store
-from pkuclaw.workers.codex import CodexWorker
+from pkuclaw.runtime_config import RuntimeConfigLoader
 
 
 class CoreLoop:
@@ -16,14 +24,17 @@ class CoreLoop:
         self,
         *,
         store: Store,
-        codex_worker: CodexWorker,
+        code_agent: CodeAgent,
+        runtime_config: RuntimeConfigLoader,
         teaching_backbone: TeachingBackbone | None = None,
     ) -> None:
         self.store = store
-        self.codex_worker = codex_worker
+        self.code_agent = code_agent
+        self.runtime_config = runtime_config
         self.teaching_backbone = teaching_backbone
 
     def ingest(self, message: ChannelMessage) -> CoreDispatch:
+        self.runtime_config.read()
         command = parse_control_command(text=message.text, event_key=message.event_key)
         if command is not None:
             reply = self._handle_control(
@@ -32,6 +43,11 @@ class CoreLoop:
                 value=command.value,
             )
             return CoreDispatch(reply_text=reply, handled_locally=True)
+        if message.event_key:
+            return CoreDispatch(
+                reply_text=f"未知控制动作：{message.event_key}",
+                handled_locally=True,
+            )
 
         plan = classify_message(message.text)
         run = self.store.create_run(
@@ -56,9 +72,14 @@ class CoreLoop:
             plan=plan,
         )
 
-    def run_worker(self, run_id: str, plan: TaskPlan) -> WorkerResult:
+    def run_code_agent(
+        self,
+        run_id: str,
+        plan: TaskPlan,
+        sink: CodeAgentEventSink,
+    ) -> CodeAgentResult:
         run = self.store.get_run(run_id)
-        return self.codex_worker.run(run, plan)
+        return self.code_agent.run(run, plan, sink)
 
     def collect_teaching_snapshot(self) -> str:
         if self.teaching_backbone is None:
@@ -73,25 +94,71 @@ class CoreLoop:
         kind: str,
         value: str | None,
     ) -> str:
+        if kind == "set_provider":
+            if value is None:
+                raise RuntimeError("provider value is required")
+            conversation = self.store.update_agent_settings(
+                conversation_id,
+                provider=value,
+            )
+            return f"已切换 Code Agent provider 到 {conversation.agent_settings.provider}。"
+
         if kind == "set_mode":
             if value is None:
                 raise RuntimeError("mode value is required")
-            conversation = self.store.set_conversation_mode(conversation_id, value)
-            log.ok(
-                "mode switched: "
-                f"conversation={_short_id(conversation_id)}, mode={conversation.mode}"
+            conversation = self.store.update_agent_settings(
+                conversation_id,
+                mode=value,
             )
-            return f"已切换到 {mode_label(conversation.mode)} 模式。"
+            log.ok(
+                "code-agent mode switched: "
+                f"conversation={_short_id(conversation_id)}, "
+                f"mode={conversation.agent_settings.mode}"
+            )
+            return (
+                "已切换 Code Agent 到 "
+                f"{mode_label(conversation.agent_settings.mode)} 模式。"
+            )
+
+        if kind == "set_model":
+            if value is None:
+                raise RuntimeError("model value is required")
+            conversation = self.store.update_agent_settings(
+                conversation_id,
+                model=value,
+            )
+            return f"已切换 Code Agent 模型到 {conversation.agent_settings.model}。"
+
+        if kind == "set_reasoning":
+            if value is None:
+                raise RuntimeError("reasoning value is required")
+            conversation = self.store.update_agent_settings(
+                conversation_id,
+                reasoning_effort=value,
+            )
+            return (
+                "已切换 Code Agent 思考强度到 "
+                f"{conversation.agent_settings.reasoning_effort}。"
+            )
 
         if kind == "status":
             conversation = self.store.ensure_conversation(conversation_id)
+            runtime = self.runtime_config.read()
+            agent_settings = merge_agent_settings(
+                runtime.code_agent,
+                conversation.agent_settings,
+            )
             counts = self.store.counts_by_status()
             status_text = ", ".join(
                 f"{name}={count}" for name, count in sorted(counts.items())
             )
             return (
-                f"当前模式：{mode_label(conversation.mode)}\n"
-                f"Codex thread：{conversation.codex_session_id or '无'}\n"
+                f"Code agent：{agent_settings.provider}\n"
+                f"Agent mode：{mode_label(agent_settings.mode or 'standard')}\n"
+                f"Model：{agent_settings.model or '默认'}\n"
+                f"Reasoning：{agent_settings.reasoning_effort or '默认'}\n"
+                f"Runtime config：{runtime.path}\n"
+                f"Agent thread：{conversation.agent_session_id or '无'}\n"
                 f"任务统计：{status_text or '暂无任务'}"
             )
 
