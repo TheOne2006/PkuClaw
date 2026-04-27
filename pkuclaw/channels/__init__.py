@@ -1,0 +1,1 @@
+"""Chat channel adapters."""

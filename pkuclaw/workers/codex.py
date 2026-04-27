@@ -1,0 +1,1 @@
+"""Codex worker adapter placeholder."""

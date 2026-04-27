@@ -6,6 +6,16 @@
 !/LICENSE
 !/README.md
 !/skill.md
+!/pyproject.toml
+!/configs/
+!/configs/**/
+!/configs/**/*
+!/pkuclaw/
+!/pkuclaw/**/
+!/pkuclaw/**/*
+!/scripts/
+!/scripts/**/
+!/scripts/**/*
 !/sub-skills/
 !/sub-skills/**/
 !/sub-skills/**/*
@@ -13,12 +23,28 @@
 !/codex/**/
 !/codex/**/*
 !/images
+!/crates/
+!/crates/**/
+!/crates/**/*
+crates/*/target/
 archive/
 # docs/ 在 main 分支被忽略，文档网站托管在独立的 docs 分支
 docs/
 # 汇总报告（自动生成）
 通知摘要汇总.md
 
+# Local secrets and runtime state
+.env
+.env.*
+!.env.example
+data/
+logs/
+tmp/
+
 # OS
 .DS_Store
 Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
