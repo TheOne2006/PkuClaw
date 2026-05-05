@@ -6,9 +6,9 @@ import threading
 from pkuclaw.agents import AgentWrapper
 from pkuclaw.config import Settings
 from pkuclaw.core import logging as log
-from pkuclaw.core.app import CoreLoop
+from pkuclaw.core.app import CoreRuntime
 from pkuclaw.core.store import Store
-from pkuclaw.loop import LoopThread
+from pkuclaw.loop import LoopManager
 from pkuclaw.mcp import ChannelToolServer
 from pkuclaw.runtime_config import RuntimeConfigLoader
 
@@ -53,7 +53,7 @@ def run_feishu_bot(
     log.ok("Feishu API client ready")
 
     store = _open_store(settings)
-    core_loop = _build_core_loop(settings=settings, store=store)
+    core_runtime = _build_core_runtime(settings=settings, store=store)
     executor = ThreadPoolExecutor(max_workers=settings.codex.max_concurrent_runs)
     callback_executor = ThreadPoolExecutor(max_workers=2)
     log.ok(f"Agent worker pool ready: max_workers={settings.codex.max_concurrent_runs}")
@@ -64,11 +64,11 @@ def run_feishu_bot(
             card_renderer=card_renderer,
         )
     if enable_loop:
-        _start_loop_thread(settings=settings, core_loop=core_loop)
+        _start_loop_manager(settings=settings, core_runtime=core_runtime)
 
     handlers = FeishuEventHandlers(
         settings=settings,
-        core_loop=core_loop,
+        core_runtime=core_runtime,
         message_client=message_client,
         card_renderer=card_renderer,
         card_action_response_cls=sdk.card_action_response,
@@ -93,15 +93,15 @@ def run_feishu_bot(
     client.start()
 
 
-def _start_loop_thread(*, settings: Settings, core_loop: CoreLoop) -> None:
-    loop_thread = LoopThread(settings=settings, core_loop=core_loop)
+def _start_loop_manager(*, settings: Settings, core_runtime: CoreRuntime) -> None:
+    loop_manager = LoopManager(settings=settings, core_runtime=core_runtime)
     thread = threading.Thread(
-        target=loop_thread.run_forever,
-        name="pkuclaw-loop",
+        target=loop_manager.run_forever,
+        name="pkuclaw-loop-manager",
         daemon=True,
     )
     thread.start()
-    log.ok("Loop thread started")
+    log.ok("LoopManager started")
 
 
 def _start_mcp_thread(
@@ -164,7 +164,7 @@ def _open_store(settings: Settings) -> Store:
     return store
 
 
-def _build_core_loop(*, settings: Settings, store: Store) -> CoreLoop:
+def _build_core_runtime(*, settings: Settings, store: Store) -> CoreRuntime:
     log.stage("Building realtime runtime")
     runtime_config = RuntimeConfigLoader(settings.app.runtime_config_dir)
     agent_wrapper = AgentWrapper(
@@ -172,10 +172,10 @@ def _build_core_loop(*, settings: Settings, store: Store) -> CoreLoop:
         store=store,
         runtime_config=runtime_config,
     )
-    core_loop = CoreLoop(
+    core_runtime = CoreRuntime(
         store=store,
         agent_wrapper=agent_wrapper,
         runtime_config=runtime_config,
     )
-    log.ok("Realtime runtime ready: channel -> Agent-Wrapper -> Agent")
-    return core_loop
+    log.ok("Realtime runtime ready: channel -> AgentWrapper -> Agent")
+    return core_runtime

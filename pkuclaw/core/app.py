@@ -14,11 +14,11 @@ from pkuclaw.core.models import (
 )
 from pkuclaw.core.router import classify_message
 from pkuclaw.core.store import Store
-from pkuclaw.runtime_config import RuntimeConfigLoader
+from pkuclaw.runtime_config import RuntimeConfigLoader, RuntimeLoopConfig
 
 
-class CoreLoop:
-    """Shared application loop used by Feishu, future web, and future WeChat."""
+class CoreRuntime:
+    """Daemon control plane for channel ingress, scheduled runs, and agent execution."""
 
     def __init__(
         self,
@@ -72,31 +72,35 @@ class CoreLoop:
             agent_request=agent_request,
         )
 
-    def create_loop_run(self) -> CoreDispatch:
+    def create_loop_run(self, *, loop_id: str | None = None) -> CoreDispatch:
         runtime = self.runtime_config.read()
-        text = runtime.loop.prompt or (
+        loop = _select_loop(runtime.loops, loop_id=loop_id)
+        text = loop.prompt or (
             "检查课程状态、教学网通知和本地数据。如果没有重要变化，保持静默。"
         )
-        skill_names = runtime.loop.skill_names or ("tasks/sync-notices.md",)
+        skill_names = loop.skill_names or ("tasks/sync-notices.md",)
         plan = TaskPlan(
             intent="loop",
             skill_names=skill_names,
-            ack="Loop run queued.",
+            ack=f"Loop run queued: {loop.id}.",
         )
         request = AgentRunRequest(
             source="loop",
-            conversation_id="daemon:loop",
+            conversation_id=f"daemon:loop:{loop.id}",
             text=text,
             intent=plan.intent,
             skill_names=plan.skill_names,
             channel=None,
             sender_id=None,
-            channel_context={},
-            sink_mode="silent",
+            channel_context={
+                "loop_id": loop.id,
+                "notify_policy": loop.notify_policy,
+            },
+            sink_mode=loop.sink_mode,
         )
         prepared = self.agent_wrapper.prepare(request, plan)
         return CoreDispatch(
-            reply_text="Loop run queued.",
+            reply_text=f"Loop run queued: {loop.id}.",
             run_id=prepared.run_id,
             plan=plan,
             agent_request=request,
@@ -212,3 +216,19 @@ def _short_id(value: str) -> str:
     if len(value) <= 12:
         return value
     return f"{value[:6]}...{value[-4:]}"
+
+
+def _select_loop(
+    loops: tuple[RuntimeLoopConfig, ...],
+    *,
+    loop_id: str | None,
+) -> RuntimeLoopConfig:
+    enabled = [loop for loop in loops if loop.enabled]
+    if loop_id is not None:
+        for loop in enabled:
+            if loop.id == loop_id:
+                return loop
+        raise RuntimeError(f"runtime loop not found or disabled: {loop_id}")
+    if enabled:
+        return enabled[0]
+    raise RuntimeError("no enabled runtime loops")

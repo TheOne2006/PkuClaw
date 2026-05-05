@@ -6,7 +6,7 @@ from pkuclaw.core import logging as log
 
 
 def run_daemon(settings: Settings) -> None:
-    """Run the always-online daemon with realtime, loop, and MCP threads."""
+    """Run the always-online daemon with channels, CoreRuntime, LoopManager, and MCP."""
 
     log.stage("Starting PkuClaw daemon")
     run_feishu_bot(settings, enable_loop=True, enable_mcp=True)

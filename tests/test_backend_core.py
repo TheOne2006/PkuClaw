@@ -31,11 +31,11 @@ from pkuclaw.config import (
     Settings,
 )
 from pkuclaw.core import logging as log
-from pkuclaw.core.app import CoreLoop
+from pkuclaw.core.app import CoreRuntime
 from pkuclaw.core.models import AgentEvent, ChannelMessage
 from pkuclaw.core.router import classify_message
 from pkuclaw.core.store import Store
-from pkuclaw.loop import LoopThread
+from pkuclaw.loop import LoopManager
 from pkuclaw.runtime_config import RuntimeConfigLoader
 
 
@@ -81,11 +81,11 @@ class SubSkillTests(unittest.TestCase):
         self.assertIn("## tools/pku3b-setup.md", rendered)
 
 
-class StoreAndCoreLoopTests(unittest.TestCase):
+class StoreAndCoreRuntimeTests(unittest.TestCase):
     def test_conversation_mode_and_local_control(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = Store(Path(tmp) / "pkuclaw.db")
-            loop = _core_loop(Path(tmp), store)
+            loop = _core_runtime(Path(tmp), store)
 
             dispatch = loop.ingest(
                 ChannelMessage(
@@ -120,7 +120,7 @@ class StoreAndCoreLoopTests(unittest.TestCase):
     def test_user_message_creates_run(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = Store(Path(tmp) / "pkuclaw.db")
-            loop = _core_loop(Path(tmp), store)
+            loop = _core_runtime(Path(tmp), store)
 
             dispatch = loop.ingest(
                 ChannelMessage(
@@ -139,7 +139,7 @@ class StoreAndCoreLoopTests(unittest.TestCase):
     def test_unknown_event_key_does_not_create_run(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = Store(Path(tmp) / "pkuclaw.db")
-            loop = _core_loop(Path(tmp), store)
+            loop = _core_runtime(Path(tmp), store)
 
             dispatch = loop.ingest(
                 ChannelMessage(
@@ -211,7 +211,7 @@ class FeishuCardTests(unittest.TestCase):
                 "# 标题\n\n"
                 "- 第一项\n"
                 "- 第二项\n\n"
-                "路径 `configs/runtime/agent.json`\n\n"
+                "路径 `configs/runtime/runtime.json`\n\n"
                 "```py\n"
                 "print('<at id=all></at>')\n"
                 "```\n"
@@ -224,8 +224,8 @@ class FeishuCardTests(unittest.TestCase):
         markdown = "\n".join(_markdown_contents(card))
         self.assertIn("# 标题", markdown)
         self.assertIn("- 第一项", markdown)
-        self.assertIn("路径 configs/runtime/agent.json", markdown)
-        self.assertNotIn("路径 `configs/runtime/agent.json`", markdown)
+        self.assertIn("路径 configs/runtime/runtime.json", markdown)
+        self.assertNotIn("路径 `configs/runtime/runtime.json`", markdown)
         self.assertIn("```python", markdown)
         self.assertIn("＜at id=all>＜/at>", markdown)
         self.assertNotIn("最近事件", markdown)
@@ -388,7 +388,7 @@ class AgentWrapperAndCodexTests(unittest.TestCase):
             root = Path(tmp)
             runtime_dir = root / "runtime"
             runtime_dir.mkdir()
-            (runtime_dir / "agent.json").write_text(
+            (runtime_dir / "runtime.json").write_text(
                 json.dumps(
                     {
                         "agent": {"mode": "fast", "model": "gpt-test"},
@@ -466,7 +466,7 @@ class AgentWrapperAndCodexTests(unittest.TestCase):
                 encoding="utf-8"
             )
             self.assertIn("# PkuClaw Agent Run", prompt)
-            self.assertIn("Agent-Wrapper owns prompt construction", prompt)
+            self.assertIn("AgentWrapper owns prompt construction", prompt)
             self.assertIn("# Extra fragment", prompt)
             self.assertIn("## runtime/codex-subagent.md", prompt)
             self.assertIn("started", [event.kind for event in sink.events])
@@ -491,6 +491,7 @@ class RuntimeConfigTests(unittest.TestCase):
             config = loader.read()
 
             self.assertEqual(config.agent.provider, "codex")
+            self.assertEqual(config.loops[0].id, "sync_notices")
             self.assertTrue(config.warnings)
             self.assertIn("fallback", config.warnings[0])
 
@@ -499,14 +500,19 @@ class RuntimeConfigTests(unittest.TestCase):
             root = Path(tmp)
             runtime_dir = root / "runtime"
             runtime_dir.mkdir()
-            (runtime_dir / "agent.json").write_text(
+            (runtime_dir / "runtime.json").write_text(
                 json.dumps(
                     {
-                        "loop": {
-                            "prompt": "loop prompt",
-                            "skill_names": ["tasks/sync-notices.md"],
-                            "interval_seconds": 1,
-                        }
+                        "loops": [
+                            {
+                                "id": "sync_notices",
+                                "enabled": True,
+                                "prompt": "loop prompt",
+                                "skill_names": ["tasks/sync-notices.md"],
+                                "interval_seconds": 1,
+                                "sink_mode": "silent",
+                            }
+                        ]
                     },
                     ensure_ascii=False,
                 ),
@@ -515,7 +521,7 @@ class RuntimeConfigTests(unittest.TestCase):
             _write_test_subskills(root / "sub-skills")
             settings = _settings(root)
             store = Store(settings.app.data_dir / "pkuclaw.db")
-            loop = _core_loop(root, store)
+            loop = _core_runtime(root, store)
 
             def fake_popen(command, **kwargs):
                 output_path = Path(command[command.index("-o") + 1])
@@ -526,7 +532,7 @@ class RuntimeConfigTests(unittest.TestCase):
                 patch("pkuclaw.code_agents.codex.subprocess.Popen", side_effect=fake_popen),
                 patch.object(log.console, "print"),
             ):
-                run_id = LoopThread(settings=settings, core_loop=loop).tick(reason="manual")
+                run_id = LoopManager(settings=settings, core_runtime=loop).tick(reason="manual")
 
             run = store.get_run(run_id)
             self.assertEqual(run.intent, "loop")
@@ -833,10 +839,10 @@ def _fake_feishu_cardkit_client(fake_api: FakeFeishuApi) -> FeishuCardKitClient:
     )
 
 
-def _core_loop(root: Path, store: Store) -> CoreLoop:
+def _core_runtime(root: Path, store: Store) -> CoreRuntime:
     settings = _settings(root)
     runtime_config = RuntimeConfigLoader(root / "runtime")
-    return CoreLoop(
+    return CoreRuntime(
         store=store,
         agent_wrapper=AgentWrapper(
             settings=settings,

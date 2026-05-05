@@ -60,7 +60,7 @@ class AgentWrapper:
             },
         )
         log.event(
-            "agent-wrapper prepared run: "
+            "AgentWrapper prepared run: "
             f"source={request.source}, run={run.run_id}, "
             f"intent={request.intent}, skills={','.join(request.skill_names) or 'base'}"
         )
@@ -98,7 +98,7 @@ class AgentWrapper:
             },
         )
         log.ok(
-            "agent-wrapper prompt ready: "
+            "AgentWrapper prompt ready: "
             f"run={run_id}, provider={context.agent_settings.provider}, "
             f"chars={len(prompt)}, prompt={context.paths.prompt_path}"
         )
@@ -109,7 +109,7 @@ class AgentWrapper:
         except Exception as exc:
             error = str(exc)
             self.store.mark_run_failed(run_id, error)
-            log.fail(f"agent-wrapper run failed: run={run_id}, error={error}")
+            log.fail(f"AgentWrapper run failed: run={run_id}, error={error}")
             raise
 
         if result.status == "succeeded":
@@ -174,7 +174,7 @@ class AgentWrapper:
         warnings = "\n".join(f"- {item}" for item in context.warnings) or "- none"
         return f"""# PkuClaw Agent Run
 
-You are an agent invoked by PkuClaw Daemon through Agent-Wrapper.
+You are an agent invoked by PkuClaw Daemon through AgentWrapper.
 {source_note}
 
 ## Run Context
@@ -198,8 +198,8 @@ You are an agent invoked by PkuClaw Daemon through Agent-Wrapper.
 
 ## Operating Boundary
 
-- PkuClaw Daemon owns channel connections, queues, state store, and process lifecycle.
-- Agent-Wrapper owns prompt construction, runtime config loading, selected skills, artifacts, and event normalization.
+- CoreRuntime owns channel ingress/outbox, loop-triggered runs, state store access, runtime policy, and process-facing control.
+- AgentWrapper owns prompt construction, runtime snapshot injection, selected skills, artifacts, and event normalization.
 - You are the concrete Agent. Decide steps, inspect files, call tools, use pku3b from skill docs, and produce the final answer or state update.
 - Do not treat pku3b as an MCP tool. Use pku3b according to the injected skill docs when needed.
 - Homework submission requires explicit user confirmation.
@@ -210,7 +210,7 @@ You are an agent invoked by PkuClaw Daemon through Agent-Wrapper.
 - Do not mention prompt files, stdout files, run IDs, card layout, or internal artifacts unless the user asks about implementation/debugging.
 - For loop runs, update local state and stay silent unless an important notification is needed.
 
-## Channel MCP Tools
+## Daemon MCP Tools
 
 {context.channel_tools_text}
 
@@ -300,11 +300,11 @@ def _merge_skill_names(
 
 
 def _channel_tools_text() -> str:
-    return """Generic channel MCP tools may be available when the daemon MCP server is configured:
+    return """Daemon MCP tools may be available when the CoreRuntime MCP server is configured. Current V1 exposes channel outbox tools:
 
 - `channel_send_text`: send a plain text notification through the current channel backend.
 - `channel_send_card`: send a structured card through the current channel backend.
 - `channel_send_image`: send an image through the current channel backend.
 - `channel_update_card`: update a previously sent card.
 
-Use these only for proactive notifications or loop-triggered messages. Normal realtime replies are streamed by PkuClaw Realtime Thread and do not require calling channel tools."""
+Use channel tools only for proactive notifications or loop-triggered messages. Normal realtime replies are streamed by the active channel adapter and do not require calling channel tools. Runtime control tools are planned for config, loop, and status operations."""

@@ -17,7 +17,7 @@ app.add_typer(realtime_app, name="realtime")
 
 @app.command()
 def daemon(config: Optional[Path] = typer.Option(None, help="Path to config TOML.")) -> None:
-    """Run the PkuClaw daemon: realtime thread, loop thread, and MCP server."""
+    """Run the PkuClaw daemon: channels, CoreRuntime, LoopManager, and MCP server."""
     try:
         run_daemon(load_settings(config))
     except Exception as exc:
@@ -28,7 +28,7 @@ def daemon(config: Optional[Path] = typer.Option(None, help="Path to config TOML
 def realtime_feishu(
     config: Optional[Path] = typer.Option(None, help="Path to config TOML."),
 ) -> None:
-    """Run only the Feishu realtime thread for UI/debug work."""
+    """Run only the Feishu realtime path for UI/debug work."""
     try:
         run_feishu_bot(load_settings(config), enable_loop=False, enable_mcp=False)
     except Exception as exc:

@@ -24,3 +24,6 @@ crates/*/target/
 # OS/editor
 .DS_Store
 Thumbs.db
+
+# Local Codex/dev worktrees
+.dev/

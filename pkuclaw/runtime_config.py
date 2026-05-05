@@ -8,7 +8,7 @@ from typing import Any
 from pkuclaw.core.models import AgentSettings
 
 
-RUNTIME_CONFIG_FILE = "agent.json"
+RUNTIME_CONFIG_FILE = "runtime.json"
 
 
 @dataclass(frozen=True)
@@ -19,9 +19,13 @@ class RuntimeCodexConfig:
 
 @dataclass(frozen=True)
 class RuntimeLoopConfig:
+    id: str = "sync_notices"
+    enabled: bool = True
     interval_seconds: int | None = None
     prompt: str = ""
     skill_names: tuple[str, ...] = ()
+    sink_mode: str = "silent"
+    notify_policy: str = "important_only"
 
 
 @dataclass(frozen=True)
@@ -40,7 +44,7 @@ class RuntimeConfig:
     path: Path
     agent: AgentSettings
     codex: RuntimeCodexConfig
-    loop: RuntimeLoopConfig
+    loops: tuple[RuntimeLoopConfig, ...]
     prompt: RuntimePromptConfig
     notifications: RuntimeNotificationConfig
     warnings: tuple[str, ...] = field(default_factory=tuple)
@@ -76,7 +80,6 @@ class RuntimeConfigLoader:
 
         agent_raw = _section(raw, "agent")
         codex_raw = _section(raw, "codex")
-        loop_raw = _section(raw, "loop")
         prompt_raw = _section(raw, "prompt")
         notifications_raw = _section(raw, "notifications")
         return RuntimeConfig(
@@ -91,11 +94,7 @@ class RuntimeConfigLoader:
                 sandbox=_optional_str(codex_raw, "sandbox"),
                 timeout_seconds=_optional_int(codex_raw, "timeout_seconds"),
             ),
-            loop=RuntimeLoopConfig(
-                interval_seconds=_optional_int(loop_raw, "interval_seconds"),
-                prompt=_optional_str(loop_raw, "prompt") or "",
-                skill_names=_optional_str_tuple(loop_raw, "skill_names"),
-            ),
+            loops=_read_loops(raw),
             prompt=RuntimePromptConfig(
                 fragment_paths=_optional_str_tuple(prompt_raw, "fragment_paths"),
                 default_skill_names=_optional_str_tuple(
@@ -114,11 +113,7 @@ def _default_config(path: Path) -> RuntimeConfig:
         path=path,
         agent=AgentSettings(provider="codex", mode="standard"),
         codex=RuntimeCodexConfig(sandbox="workspace-write", timeout_seconds=1800),
-        loop=RuntimeLoopConfig(
-            interval_seconds=900,
-            prompt="检查课程状态、教学网通知和本地数据。如果没有重要变化，保持静默。",
-            skill_names=("tasks/sync-notices.md",),
-        ),
+        loops=_default_loops(),
         prompt=RuntimePromptConfig(),
         notifications=RuntimeNotificationConfig(),
     )
@@ -129,10 +124,53 @@ def _with_warning(config: RuntimeConfig, warning: str) -> RuntimeConfig:
         path=config.path,
         agent=config.agent,
         codex=config.codex,
-        loop=config.loop,
+        loops=config.loops,
         prompt=config.prompt,
         notifications=config.notifications,
         warnings=(*config.warnings, warning),
+    )
+
+
+def _read_loops(raw: dict[str, Any]) -> tuple[RuntimeLoopConfig, ...]:
+    value = raw.get("loops")
+    if value is None:
+        return _default_loops()
+    if not isinstance(value, list):
+        raise RuntimeError("runtime config value loops must be an array")
+    loops: list[RuntimeLoopConfig] = []
+    seen: set[str] = set()
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            raise RuntimeError("runtime config value loops must be an object array")
+        loop_id = _optional_str(item, "id") or f"loop_{index + 1}"
+        if loop_id in seen:
+            raise RuntimeError(f"duplicate runtime loop id: {loop_id}")
+        seen.add(loop_id)
+        loops.append(
+            RuntimeLoopConfig(
+                id=loop_id,
+                enabled=_optional_bool(item, "enabled", default=True),
+                interval_seconds=_optional_int(item, "interval_seconds"),
+                prompt=_optional_str(item, "prompt") or "",
+                skill_names=_optional_str_tuple(item, "skill_names"),
+                sink_mode=_optional_str(item, "sink_mode") or "silent",
+                notify_policy=_optional_str(item, "notify_policy") or "important_only",
+            )
+        )
+    return tuple(loops)
+
+
+def _default_loops() -> tuple[RuntimeLoopConfig, ...]:
+    return (
+        RuntimeLoopConfig(
+            id="sync_notices",
+            enabled=True,
+            interval_seconds=900,
+            prompt="检查课程状态、教学网通知和本地数据。如果没有重要变化，保持静默。",
+            skill_names=("tasks/sync-notices.md",),
+            sink_mode="silent",
+            notify_policy="important_only",
+        ),
     )
 
 
@@ -159,6 +197,13 @@ def _optional_int(section: dict[str, Any], key: str) -> int | None:
         return None
     if not isinstance(value, int):
         raise RuntimeError(f"runtime config value {key} must be an integer")
+    return value
+
+
+def _optional_bool(section: dict[str, Any], key: str, *, default: bool) -> bool:
+    value = section.get(key, default)
+    if not isinstance(value, bool):
+        raise RuntimeError(f"runtime config value {key} must be a boolean")
     return value
 
 

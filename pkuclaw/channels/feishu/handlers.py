@@ -7,7 +7,7 @@ from typing import Any
 
 from pkuclaw.config import Settings
 from pkuclaw.core import logging as log
-from pkuclaw.core.app import CoreLoop
+from pkuclaw.core.app import CoreRuntime
 from pkuclaw.core.models import ChannelMessage
 
 from .cards import FeishuCardKitClient, FeishuCardRenderer, FeishuRunCardSink
@@ -41,7 +41,7 @@ class ChatLocks:
 @dataclass
 class FeishuEventHandlers:
     settings: Settings
-    core_loop: CoreLoop
+    core_runtime: CoreRuntime
     message_client: FeishuCardKitClient
     card_renderer: FeishuCardRenderer
     card_action_response_cls: Any
@@ -61,7 +61,7 @@ class FeishuEventHandlers:
             return
 
         text = extract_text_content(getattr(message, "content", ""))
-        dispatch = self.core_loop.ingest(
+        dispatch = self.core_runtime.ingest(
             ChannelMessage(
                 channel="feishu",
                 conversation_id=feishu_conversation_id(sender_id),
@@ -92,14 +92,14 @@ class FeishuEventHandlers:
         sink = FeishuRunCardSink(
             client=self.message_client,
             renderer=self.card_renderer,
-            store=self.core_loop.store,
+            store=self.core_runtime.store,
             chat_id=chat_id,
             run_id=dispatch.run_id,
         )
         try:
             sink.start()
         except Exception as exc:
-            self.core_loop.store.mark_run_failed(dispatch.run_id, str(exc))
+            self.core_runtime.store.mark_run_failed(dispatch.run_id, str(exc))
             log.fail(
                 "failed to create Feishu run card: "
                 f"run={dispatch.run_id}, error={exc}"
@@ -108,7 +108,7 @@ class FeishuEventHandlers:
 
         self.executor.submit(
             process_code_agent_run,
-            self.core_loop,
+            self.core_runtime,
             self.chat_locks.for_chat(chat_id),
             chat_id,
             dispatch.run_id,
@@ -127,7 +127,7 @@ class FeishuEventHandlers:
             log.warn("bot menu event missing event_key/open_id")
             return
 
-        dispatch = self.core_loop.ingest(
+        dispatch = self.core_runtime.ingest(
             ChannelMessage(
                 channel="feishu",
                 conversation_id=feishu_conversation_id(open_id),
@@ -182,7 +182,7 @@ class FeishuEventHandlers:
         self.callback_executor.submit(
             send_run_detail_card,
             self.settings,
-            self.core_loop,
+            self.core_runtime,
             self.card_renderer,
             self.message_client,
             receive_id_type,
@@ -204,7 +204,7 @@ class FeishuEventHandlers:
 
 
 def process_code_agent_run(
-    core_loop: CoreLoop,
+    core_runtime: CoreRuntime,
     lock: threading.Lock,
     chat_id: str,
     run_id: str,
@@ -217,13 +217,13 @@ def process_code_agent_run(
             log.stage(
                 f"Agent run starting: run={run_id}, chat={short_id(chat_id)}"
             )
-            result = core_loop.run_agent(run_id, plan, agent_request, sink)
+            result = core_runtime.run_agent(run_id, plan, agent_request, sink)
             log.ok(
                 "Agent run completed: "
                 f"run={run_id}, status={result.status}, "
                 f"thread={result.session_id or 'none'}, result={result.result_path}"
             )
         except Exception as exc:
-            core_loop.store.mark_run_failed(run_id, str(exc))
+            core_runtime.store.mark_run_failed(run_id, str(exc))
             sink.fail(str(exc))
             log.fail(f"Agent run failed: run={run_id}, error={exc}")

@@ -1,1 +1,1 @@
-"""Core loop, state, controls, and routing."""
+"""Core runtime models, state, controls, and routing."""

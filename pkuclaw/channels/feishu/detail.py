@@ -5,7 +5,7 @@ from typing import Any
 from pkuclaw.code_agents.artifacts import build_codex_artifact_detail
 from pkuclaw.config import Settings
 from pkuclaw.core import logging as log
-from pkuclaw.core.app import CoreLoop
+from pkuclaw.core.app import CoreRuntime
 from pkuclaw.core.control import mode_label
 from pkuclaw.core.models import merge_agent_settings
 
@@ -30,7 +30,7 @@ def send_control_card(
 
 def send_run_detail_card(
     settings: Settings,
-    core_loop: CoreLoop,
+    core_runtime: CoreRuntime,
     renderer: FeishuCardRenderer,
     message_client: FeishuCardKitClient,
     receive_id_type: str,
@@ -41,7 +41,7 @@ def send_run_detail_card(
     try:
         detail_card = build_run_detail_card(
             settings=settings,
-            core_loop=core_loop,
+            core_runtime=core_runtime,
             renderer=renderer,
             run_id=run_id,
             page=page,
@@ -63,27 +63,27 @@ def send_run_detail_card(
 def build_run_detail_card(
     *,
     settings: Settings,
-    core_loop: CoreLoop,
+    core_runtime: CoreRuntime,
     renderer: FeishuCardRenderer,
     run_id: str,
     page: int,
 ) -> dict[str, Any]:
-    run = core_loop.store.get_run(run_id)
+    run = core_runtime.store.get_run(run_id)
     detail = build_codex_artifact_detail(data_dir=settings.app.data_dir, run=run)
     return renderer.run_detail_card(
         run_id=run_id,
         status=run.status,
         elapsed=detail.elapsed,
-        agent_context=agent_context(core_loop, run.conversation_id),
+        agent_context=agent_context(core_runtime, run.conversation_id),
         artifacts=detail.artifacts,
         events=detail.events,
         page=page,
     )
 
 
-def agent_context(core_loop: CoreLoop, conversation_id: str) -> dict[str, str]:
-    conversation = core_loop.store.ensure_conversation(conversation_id)
-    runtime = core_loop.runtime_config.read()
+def agent_context(core_runtime: CoreRuntime, conversation_id: str) -> dict[str, str]:
+    conversation = core_runtime.store.ensure_conversation(conversation_id)
+    runtime = core_runtime.runtime_config.read()
     settings = merge_agent_settings(runtime.agent, conversation.agent_settings)
     mode = settings.mode or "standard"
     return {

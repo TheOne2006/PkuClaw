@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "agent": {
+    "provider": "codex",
+    "mode": "standard",
+    "model": "",
+    "reasoning_effort": ""
+  },
+  "codex": {
+    "sandbox": "workspace-write",
+    "timeout_seconds": 1800
+  },
+  "loops": [
+    {
+      "id": "sync_notices",
+      "enabled": true,
+      "interval_seconds": 900,
+      "prompt": "检查课程状态、教学网通知和本地数据。如果没有重要变化，保持静默；如果发现重要变化，可以通过 daemon MCP channel tools 主动通知用户。",
+      "skill_names": [
+        "tasks/sync-notices.md"
+      ],
+      "sink_mode": "silent",
+      "notify_policy": "important_only"
+    }
+  ],
+  "prompt": {
+    "fragment_paths": [],
+    "default_skill_names": []
+  },
+  "notifications": {
+    "policy": "important_only"
+  },
+  "permissions": {
+    "agent_can_update_runtime": true,
+    "agent_can_add_loop": true,
+    "agent_can_modify_boot_config": false
+  }
+}
