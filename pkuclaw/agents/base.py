@@ -1,3 +1,4 @@
+"""定义 Agent provider 边界和一次运行所需的上下文数据。"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -17,6 +18,7 @@ from pkuclaw.runtime_config import RuntimeConfig
 
 @dataclass(frozen=True)
 class AgentRunPaths:
+    """一次 Agent run 产生和读取的文件路径集合。"""
     run_dir: Path
     prompt_path: Path
     result_path: Path
@@ -26,6 +28,7 @@ class AgentRunPaths:
 
 @dataclass(frozen=True)
 class AgentRunContext:
+    """Agent provider 执行时需要的完整只读上下文。"""
     run: RunRecord
     request: AgentRunRequest
     plan: TaskPlan
@@ -42,6 +45,7 @@ class AgentRunContext:
 
 
 class Agent(Protocol):
+    """所有具体 Agent provider 需要实现的执行协议。"""
     name: str
 
     def execute(

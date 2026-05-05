@@ -1,3 +1,4 @@
+"""读取 Codex run 产物并整理为可展示的详情摘要。"""
 from __future__ import annotations
 
 import json
@@ -11,6 +12,7 @@ from pkuclaw.core.store import RunRecord
 
 @dataclass(frozen=True)
 class AgentArtifactDetail:
+    """运行详情卡所需的耗时、产物路径和 Codex 事件摘要。"""
     elapsed: str
     artifacts: dict[str, str]
     events: list[str]
@@ -21,6 +23,7 @@ def build_codex_artifact_detail(
     data_dir: Path,
     run: RunRecord,
 ) -> AgentArtifactDetail:
+    """根据 run 记录定位 Codex artifacts 并生成详情摘要。"""
     run_dir = data_dir / "agent_runs" / "codex" / run.run_id
     prompt_path = run_dir / "prompt.md"
     stdout_path = run_dir / "stdout.jsonl"
@@ -39,6 +42,7 @@ def build_codex_artifact_detail(
 
 
 def codex_trace_events(stdout_path: Path) -> list[str]:
+    """读取 stdout.jsonl 并把 Codex 事件压缩成详情卡文本。"""
     if not stdout_path.exists():
         return ["stdout.jsonl 尚未生成。"]
 
@@ -54,12 +58,14 @@ def codex_trace_events(stdout_path: Path) -> list[str]:
 
 
 def _artifact_label(path: Path) -> str:
+    """返回 artifact 路径或 missing 标记。"""
     if path.exists():
         return str(path)
     return f"{path} (missing)"
 
 
 def _codex_trace_line(line: str) -> str:
+    """把一行 Codex JSONL 压缩成人类可读事件。"""
     try:
         data = json.loads(line)
     except json.JSONDecodeError:
@@ -83,6 +89,7 @@ def _codex_trace_line(line: str) -> str:
 
 
 def _find_key_recursive(value: Any, keys: set[str]) -> Any:
+    """在嵌套 dict/list 中深度查找任一候选键。"""
     if isinstance(value, dict):
         for key, item in value.items():
             if key in keys:
@@ -99,6 +106,7 @@ def _find_key_recursive(value: Any, keys: set[str]) -> Any:
 
 
 def _compact_text(text: str, limit: int) -> str:
+    """压缩空白并按长度截断文本。"""
     compact = " ".join(str(text).split())
     if len(compact) <= limit:
         return compact
@@ -106,6 +114,7 @@ def _compact_text(text: str, limit: int) -> str:
 
 
 def _run_elapsed(created_at: str, finished_at: str | None) -> str:
+    """根据 run 创建/结束时间计算展示用耗时。"""
     started = _parse_timestamp(created_at)
     finished = (
         _parse_timestamp(finished_at)
@@ -124,6 +133,7 @@ def _run_elapsed(created_at: str, finished_at: str | None) -> str:
 
 
 def _parse_timestamp(value: str | None) -> datetime | None:
+    """安全解析 ISO8601 时间戳，并补齐 UTC timezone。"""
     if not value:
         return None
     try:

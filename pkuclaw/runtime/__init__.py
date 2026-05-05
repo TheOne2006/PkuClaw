@@ -1,3 +1,4 @@
+"""runtime bootstrap 的公共导出。"""
 from __future__ import annotations
 
 from pkuclaw.runtime.bootstrap import (

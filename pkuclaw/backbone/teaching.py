@@ -1,3 +1,4 @@
+"""教学网确定性采集层，负责调用 pku3b 并保存原始快照。"""
 from __future__ import annotations
 
 import json
@@ -10,6 +11,7 @@ from pkuclaw.core.store import utc_now
 
 @dataclass(frozen=True)
 class BackboneSnapshot:
+    """一次教学网采集得到的原始文本快照。"""
     created_at: str
     assignments_raw: str
     announcements_raw: str
@@ -29,6 +31,7 @@ class TeachingBackbone:
         self.snapshot_dir = snapshot_dir
 
     def collect_snapshot(self) -> BackboneSnapshot:
+        """调用 pku3b 收集作业、通知和课程表，并写入 JSON 快照文件。"""
         self.snapshot_dir.mkdir(parents=True, exist_ok=True)
         created_at = utc_now()
         stem = created_at.replace(":", "").replace("+", "_")
@@ -55,6 +58,7 @@ class TeachingBackbone:
 
 
 def _require_success(command_name: str, completed: object) -> str:
+    """检查 subprocess 结果码，失败时抛出包含 stderr/stdout 的错误。"""
     returncode = getattr(completed, "returncode")
     stdout = getattr(completed, "stdout")
     stderr = getattr(completed, "stderr")

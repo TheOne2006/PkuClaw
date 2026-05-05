@@ -1,3 +1,4 @@
+"""Agent 抽象、运行上下文和事件 sink 的公共导出。"""
 from __future__ import annotations
 
 from pkuclaw.agents.base import Agent, AgentRunContext, AgentRunPaths

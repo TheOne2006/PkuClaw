@@ -1,3 +1,4 @@
+"""构建 Store、RuntimeConfigStore、CoreRuntime、Feishu、MCP 和 LoopManager。"""
 from __future__ import annotations
 
 from concurrent.futures import Executor, ThreadPoolExecutor
@@ -157,6 +158,7 @@ def _start_loop_manager(
     settings: Settings,
     core_runtime: CoreRuntime,
 ) -> tuple[LoopManager, threading.Thread]:
+    """创建 LoopManager 并在 daemon 线程中启动。"""
     loop_manager = LoopManager(settings=settings, core_runtime=core_runtime)
     core_runtime.attach_loop_manager(loop_manager)
     thread = threading.Thread(
@@ -175,6 +177,7 @@ def _start_mcp_thread(
     core_runtime: CoreRuntime,
     default_channel: str,
 ) -> tuple[DaemonMcpServer, threading.Thread]:
+    """创建 DaemonMcpServer 并在 daemon 线程中启动。"""
     server = DaemonMcpServer(
         host=settings.mcp.host,
         port=settings.mcp.port,
@@ -192,6 +195,7 @@ def _start_mcp_thread(
 
 
 def _open_store(settings: Settings) -> Store:
+    """打开 SQLite Store 并输出当前状态摘要。"""
     log.stage("Opening local state store")
     store = Store(settings.app.data_dir / "pkuclaw.db")
     log.ok(
@@ -208,6 +212,7 @@ def _log_runtime(
     enable_loop: bool,
     enable_mcp: bool,
 ) -> None:
+    """输出 runtime bootstrap 的启动配置摘要。"""
     log.stage("Booting PkuClaw runtime")
     log.startup_table(
         "Runtime",

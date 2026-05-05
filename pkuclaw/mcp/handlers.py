@@ -1,3 +1,4 @@
+"""把 MCP tool call 分发到 CoreRuntime 的真实业务方法。"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -17,9 +18,11 @@ class DaemonMcpToolHandler:
     default_channel: str = "feishu"
 
     def list_tools(self) -> list[dict[str, Any]]:
+        """返回 MCP 工具 schema 列表。"""
         return list_tool_schemas()
 
     def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> McpToolResult:
+        """校验 tool 参数对象，并按工具名分发到对应处理方法。"""
         args = arguments or {}
         if not isinstance(args, dict):
             raise RuntimeError("tool arguments must be an object")
@@ -44,6 +47,7 @@ class DaemonMcpToolHandler:
         return handler(args)
 
     def _channel_send_text(self, args: dict[str, Any]) -> McpToolResult:
+        """内部辅助函数，封装 channel send text 逻辑。"""
         return _as_tool_result(
             self.core_runtime.send_channel_text(
                 channel=self._channel(args),
@@ -54,6 +58,7 @@ class DaemonMcpToolHandler:
         )
 
     def _channel_send_card(self, args: dict[str, Any]) -> McpToolResult:
+        """内部辅助函数，封装 channel send card 逻辑。"""
         card = _required_object(args, "card")
         return _as_tool_result(
             self.core_runtime.send_channel_card(
@@ -65,6 +70,7 @@ class DaemonMcpToolHandler:
         )
 
     def _channel_send_image(self, args: dict[str, Any]) -> McpToolResult:
+        """内部辅助函数，封装 channel send image 逻辑。"""
         return _as_tool_result(
             self.core_runtime.send_channel_image(
                 channel=self._channel(args),
@@ -75,6 +81,7 @@ class DaemonMcpToolHandler:
         )
 
     def _channel_update_card(self, args: dict[str, Any]) -> McpToolResult:
+        """内部辅助函数，封装 channel update card 逻辑。"""
         sequence = args.get("sequence")
         if not isinstance(sequence, int):
             raise RuntimeError("sequence must be an integer")
@@ -88,6 +95,7 @@ class DaemonMcpToolHandler:
         )
 
     def _runtime_get_status(self, args: dict[str, Any]) -> McpToolResult:
+        """内部辅助函数，封装 runtime get status 逻辑。"""
         return McpToolResult(
             ok=True,
             message="runtime status",
@@ -97,6 +105,7 @@ class DaemonMcpToolHandler:
         )
 
     def _runtime_get_config(self, args: dict[str, Any]) -> McpToolResult:
+        """内部辅助函数，封装 runtime get config 逻辑。"""
         _reject_unexpected_args(args, allowed=())
         return McpToolResult(
             ok=True,
@@ -105,6 +114,7 @@ class DaemonMcpToolHandler:
         )
 
     def _runtime_list_loops(self, args: dict[str, Any]) -> McpToolResult:
+        """内部辅助函数，封装 runtime list loops 逻辑。"""
         _reject_unexpected_args(args, allowed=())
         return McpToolResult(
             ok=True,
@@ -113,6 +123,7 @@ class DaemonMcpToolHandler:
         )
 
     def _runtime_list_recent_runs(self, args: dict[str, Any]) -> McpToolResult:
+        """内部辅助函数，封装 runtime list recent runs 逻辑。"""
         return McpToolResult(
             ok=True,
             message="recent runs",
@@ -125,6 +136,7 @@ class DaemonMcpToolHandler:
         )
 
     def _runtime_get_run(self, args: dict[str, Any]) -> McpToolResult:
+        """内部辅助函数，封装 runtime get run 逻辑。"""
         return McpToolResult(
             ok=True,
             message="runtime run",
@@ -134,6 +146,7 @@ class DaemonMcpToolHandler:
         )
 
     def _runtime_add_loop(self, args: dict[str, Any]) -> McpToolResult:
+        """内部辅助函数，封装 runtime add loop 逻辑。"""
         return McpToolResult(
             ok=True,
             message="runtime loop added",
@@ -145,6 +158,7 @@ class DaemonMcpToolHandler:
         )
 
     def _runtime_update_loop(self, args: dict[str, Any]) -> McpToolResult:
+        """内部辅助函数，封装 runtime update loop 逻辑。"""
         return McpToolResult(
             ok=True,
             message="runtime loop updated",
@@ -157,6 +171,7 @@ class DaemonMcpToolHandler:
         )
 
     def _runtime_enable_loop(self, args: dict[str, Any]) -> McpToolResult:
+        """内部辅助函数，封装 runtime enable loop 逻辑。"""
         return McpToolResult(
             ok=True,
             message="runtime loop enabled",
@@ -168,6 +183,7 @@ class DaemonMcpToolHandler:
         )
 
     def _runtime_disable_loop(self, args: dict[str, Any]) -> McpToolResult:
+        """内部辅助函数，封装 runtime disable loop 逻辑。"""
         return McpToolResult(
             ok=True,
             message="runtime loop disabled",
@@ -179,10 +195,12 @@ class DaemonMcpToolHandler:
         )
 
     def _channel(self, args: dict[str, Any]) -> str:
+        """读取 MCP 参数中的 channel，缺省使用 server 默认 channel。"""
         return _optional_str(args, "channel") or self.default_channel
 
 
 def _as_tool_result(result: ChannelOutboundResult) -> McpToolResult:
+    """把 channel outbox 结果转换为 MCP tool result。"""
     data = dict(result.data)
     if result.external_message_id is not None:
         data.setdefault("message_id", result.external_message_id)
@@ -194,6 +212,7 @@ def _as_tool_result(result: ChannelOutboundResult) -> McpToolResult:
 
 
 def _required_str(payload: dict[str, Any], key: str) -> str:
+    """读取必填字符串字段，不合法时抛出 RuntimeError。"""
     value = payload.get(key)
     if not isinstance(value, str) or not value.strip():
         raise RuntimeError(f"{key} is required")
@@ -201,6 +220,7 @@ def _required_str(payload: dict[str, Any], key: str) -> str:
 
 
 def _optional_str(payload: dict[str, Any], key: str) -> str | None:
+    """读取可选字符串字段，并把空白字符串归一为空值。"""
     value = payload.get(key)
     if value is None:
         return None
@@ -211,6 +231,7 @@ def _optional_str(payload: dict[str, Any], key: str) -> str | None:
 
 
 def _required_object(payload: dict[str, Any], key: str) -> dict[str, Any]:
+    """读取必填对象参数。"""
     value = payload.get(key)
     if not isinstance(value, dict):
         raise RuntimeError(f"{key} must be an object")
@@ -218,6 +239,7 @@ def _required_object(payload: dict[str, Any], key: str) -> dict[str, Any]:
 
 
 def _optional_limit(payload: dict[str, Any], key: str, *, default: int) -> int:
+    """读取分页/列表 limit，并夹紧到安全范围。"""
     value = payload.get(key, default)
     if not isinstance(value, int):
         raise RuntimeError(f"{key} must be an integer")
@@ -225,10 +247,12 @@ def _optional_limit(payload: dict[str, Any], key: str, *, default: int) -> int:
 
 
 def _actor(payload: dict[str, Any]) -> str:
+    """读取审计 actor，缺省为 agent:mcp。"""
     return _optional_str(payload, "actor") or "agent:mcp"
 
 
 def _reject_unexpected_args(payload: dict[str, Any], *, allowed: tuple[str, ...]) -> None:
+    """拒绝 schema 不允许的额外参数。"""
     unexpected = sorted(set(payload) - set(allowed))
     if unexpected:
         raise RuntimeError(f"unexpected arguments: {', '.join(unexpected)}")

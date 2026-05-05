@@ -1,3 +1,4 @@
+"""LoopManager 调度热加载的周期任务，并通过 CoreRuntime 创建 loop run。"""
 from __future__ import annotations
 
 import threading
@@ -16,6 +17,7 @@ from pkuclaw.runtime_config import RuntimeLoopConfig
 
 @dataclass(frozen=True)
 class ScheduledLoopRun:
+    """LoopManager 已提交到 executor 的一次 loop run。"""
     loop_id: str
     run_id: str
     future: Future[str]
@@ -92,6 +94,8 @@ class LoopManager:
                 loop,
                 fallback=self.settings.monitor.scan_interval_seconds,
             )
+            # First sighting is immediately due; later passes use monotonic time
+            # so wall-clock changes do not shift scheduler cadence.
             due_at = self.next_due_by_loop.setdefault(loop.id, current)
             if current < due_at:
                 continue
@@ -110,6 +114,7 @@ class LoopManager:
         return tuple(scheduled_run_ids)
 
     def run_forever(self) -> None:
+        """循环运行定时调度，直到 stop_event 被设置。"""
         log.stage("LoopManager started")
         while not self.stop_event.is_set():
             now = time.monotonic()
@@ -124,6 +129,7 @@ class LoopManager:
             self.stop_event.wait(max(1, next_wake - time.monotonic()))
 
     def shutdown(self, *, wait: bool = True) -> None:
+        """停止调度器，并在拥有 executor 时关闭 worker pool。"""
         self.stop_event.set()
         if self._owns_executor and self.executor is not None:
             self.executor.shutdown(wait=wait, cancel_futures=True)
@@ -135,10 +141,13 @@ class LoopManager:
         reason: str,
         scheduled_at: str,
     ) -> ScheduledLoopRun | None:
+        """为单个 loop 预留并发槽、创建 run、提交后台执行。"""
         if not self._reserve_loop_slot(loop):
             log.warn(f"loop run skipped because overlap is prevented: loop={loop.id}")
             return None
         try:
+            # Reserve before creating the Store run to avoid queuing duplicates
+            # when prevent_overlap/max_concurrent_runs says the loop is full.
             dispatch = self.core_runtime.create_loop_run(
                 loop_id=loop.id,
                 scheduled_at=scheduled_at,
@@ -178,6 +187,7 @@ class LoopManager:
         dispatch: CoreDispatch,
         reason: str,
     ) -> str:
+        """在 worker 线程中用 SilentSink 执行 loop dispatch。"""
         if dispatch.run_id is None or dispatch.plan is None or dispatch.agent_request is None:
             raise RuntimeError("loop dispatch did not create an agent run")
         log.stage(f"Loop run starting: reason={reason}, loop={loop_id}, run={dispatch.run_id}")
@@ -192,6 +202,7 @@ class LoopManager:
         return result.run_id
 
     def _reserve_loop_slot(self, loop: RuntimeLoopConfig) -> bool:
+        """内部辅助函数，封装 reserve loop slot 逻辑。"""
         limit = _loop_concurrency_limit(loop)
         with self._lock:
             active = self._active_by_loop.get(loop.id, 0)
@@ -201,6 +212,7 @@ class LoopManager:
             return True
 
     def _release_loop_slot(self, loop_id: str) -> None:
+        """内部辅助函数，封装 release loop slot 逻辑。"""
         with self._lock:
             active = self._active_by_loop.get(loop_id, 0) - 1
             if active > 0:
@@ -209,6 +221,7 @@ class LoopManager:
                 self._active_by_loop.pop(loop_id, None)
 
     def _finish_loop_run(self, loop_id: str, future: Future[str]) -> None:
+        """内部辅助函数，封装 finish loop run 逻辑。"""
         with self._lock:
             futures = self._futures_by_loop.get(loop_id)
             if futures is not None:
@@ -222,6 +235,7 @@ class LoopManager:
             log.fail(f"Loop run failed: loop={loop_id}, error={exc}")
 
     def _prune_loop_state(self, enabled_loop_ids: set[str]) -> None:
+        """内部辅助函数，封装 prune loop state 逻辑。"""
         with self._lock:
             for loop_id in list(self.next_due_by_loop):
                 if loop_id not in enabled_loop_ids:
@@ -231,12 +245,14 @@ class LoopManager:
                     self._active_by_loop.pop(loop_id, None)
 
     def _executor(self) -> ThreadPoolExecutor:
+        """内部辅助函数，封装 executor 逻辑。"""
         if self.executor is None:
             raise RuntimeError("LoopManager executor is not configured")
         return self.executor
 
 
 def _ensure_dispatch_ready(dispatch: CoreDispatch, *, loop_id: str) -> None:
+    """确认 loop dispatch 具备运行 Agent 所需字段。"""
     if dispatch.run_id is None or dispatch.plan is None or dispatch.agent_request is None:
         raise RuntimeError(f"loop dispatch did not create an agent run: {loop_id}")
 
@@ -246,6 +262,7 @@ def _select_enabled_loop(
     *,
     loop_id: str | None,
 ) -> RuntimeLoopConfig:
+    """选择指定 enabled loop 或第一个 enabled loop。"""
     if loop_id is not None:
         for loop in loops:
             if loop.id != loop_id:
@@ -261,10 +278,12 @@ def _select_enabled_loop(
 
 
 def _loop_interval_seconds(loop: RuntimeLoopConfig, *, fallback: int) -> int:
+    """计算 loop 调度间隔，并用启动配置兜底。"""
     return max(1, int(loop.interval_seconds or fallback or 1))
 
 
 def _loop_concurrency_limit(loop: RuntimeLoopConfig) -> int:
+    """根据 prevent_overlap/max_concurrent_runs 计算并发上限。"""
     if loop.prevent_overlap:
         return 1
     return max(1, int(loop.max_concurrent_runs or 1))

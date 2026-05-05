@@ -1,3 +1,4 @@
+"""AgentWrapper 将 CoreRuntime 的请求编译为可执行的 provider run。"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -24,6 +25,7 @@ from pkuclaw.code_agents.subskills import load_skill_registry, render_subskills
 
 @dataclass(frozen=True)
 class PreparedAgentRun:
+    """prepare 阶段返回给 channel/loop 的排队运行摘要。"""
     run_id: str
     request: AgentRunRequest
     plan: TaskPlan
@@ -47,6 +49,7 @@ class AgentWrapper:
         self._codex = CodexAgent(settings=settings, repo_root=self.repo_root)
 
     def prepare(self, request: AgentRunRequest, plan: TaskPlan) -> PreparedAgentRun:
+        """创建 queued run 记录，并返回可交给 channel/loop 的运行句柄。"""
         run = self.store.create_run(
             conversation_id=request.conversation_id,
             user_text=request.text,
@@ -75,9 +78,13 @@ class AgentWrapper:
         plan: TaskPlan,
         sink: AgentEventSink,
     ) -> AgentResult:
+        """构建上下文和 prompt，调用具体 Agent，并把结果写回 Store。"""
         run = self.store.get_run(run_id)
         context = self._build_context(run=run, request=request, plan=plan)
         prompt = self.build_run_prompt(context)
+
+        # Prompt is persisted before the provider starts so failed runs still have
+        # a reproducible input artifact for debugging.
         context.paths.run_dir.mkdir(parents=True, exist_ok=True)
         context.paths.prompt_path.write_text(prompt, encoding="utf-8")
         self.store.mark_run_running(
@@ -131,7 +138,10 @@ class AgentWrapper:
         request: AgentRunRequest,
         plan: TaskPlan,
     ) -> AgentRunContext:
+        """热加载 runtime、合并会话覆盖，并收集 prompt 构造所需材料。"""
         conversation = self.store.ensure_conversation(run.conversation_id)
+        # Runtime config is hot-loaded per run; a broken live file falls back
+        # inside RuntimeConfigStore rather than failing the whole daemon.
         runtime = self.runtime_config.read_snapshot()
         agent_settings = merge_agent_settings(
             _settings_from_runtime(runtime),
@@ -151,6 +161,8 @@ class AgentWrapper:
             self.runtime_config.config_dir / "skills.json",
             skills_dir=skills_dir,
         )
+        # Skills are rendered into the prompt, not executed here; business logic
+        # stays with the concrete Agent provider.
         rendered_skills = render_subskills(
             skill_names,
             skills_dir=skills_dir,
@@ -175,6 +187,7 @@ class AgentWrapper:
         )
 
     def build_run_prompt(self, context: AgentRunContext) -> str:
+        """把运行上下文、skills、MCP 文档和用户请求拼成最终 prompt。"""
         source_note = (
             "This is a realtime user-facing chat run."
             if context.request.source == "realtime"
@@ -249,9 +262,11 @@ You are an agent invoked by PkuClaw Daemon through AgentWrapper.
 """
 
     def _effective_model_text(self, context: AgentRunContext) -> str:
+        """返回 prompt 中展示的最终模型名称。"""
         return context.agent_settings.model or self.settings.codex.model or "default"
 
     def _effective_reasoning_text(self, context: AgentRunContext) -> str:
+        """返回 prompt 中展示的最终 reasoning effort。"""
         if context.agent_settings.reasoning_effort:
             return context.agent_settings.reasoning_effort
         return {
@@ -261,6 +276,7 @@ You are an agent invoked by PkuClaw Daemon through AgentWrapper.
         }.get(context.agent_settings.mode or "", "default")
 
     def _loop_context_text(self, context: AgentRunContext) -> str:
+        """为 loop run 生成 prompt 中的调度和通知上下文。"""
         if context.request.source != "loop":
             return "- Not a loop run."
         channel_context = context.request.channel_context
@@ -285,6 +301,7 @@ You are an agent invoked by PkuClaw Daemon through AgentWrapper.
         return "\n".join(lines)
 
     def _recent_runs_text(self, run: RunRecord) -> str:
+        """格式化同一 conversation 最近几次 run。"""
         recent = self.store.recent_runs(conversation_id=run.conversation_id, limit=5)
         lines = [
             f"- {item.created_at} [{item.intent}/{item.status}] {item.user_text[:80]}"
@@ -294,6 +311,7 @@ You are an agent invoked by PkuClaw Daemon through AgentWrapper.
         return "\n".join(lines) or "- none"
 
     def _render_prompt_fragments(self, runtime: RuntimeConfig) -> str:
+        """读取 runtime 指定的 prompt fragment，并阻止路径逃逸 repo root。"""
         blocks: list[str] = []
         for raw_path in runtime.prompt.fragment_paths:
             path = (self.repo_root / raw_path).resolve()
@@ -306,6 +324,7 @@ You are an agent invoked by PkuClaw Daemon through AgentWrapper.
         return "\n\n---\n\n".join(blocks)
 
     def _select_agent(self, agent_settings: AgentSettings) -> Agent:
+        """根据 provider 名称选择具体 Agent 实现。"""
         provider = agent_settings.provider or "codex"
         if provider == "codex":
             return self._codex
@@ -313,10 +332,12 @@ You are an agent invoked by PkuClaw Daemon through AgentWrapper.
 
 
 def _settings_from_runtime(runtime: RuntimeConfig) -> AgentSettings:
+    """从 runtime snapshot 中取出 Agent 设置。"""
     return runtime.agent
 
 
 def _run_paths(base_dir: Path, run_id: str) -> AgentRunPaths:
+    """根据 provider run 根目录和 run_id 生成标准 artifact 路径。"""
     run_dir = base_dir / run_id
     return AgentRunPaths(
         run_dir=run_dir,
@@ -331,6 +352,7 @@ def _merge_skill_names(
     default_names: tuple[str, ...],
     request_names: tuple[str, ...],
 ) -> tuple[str, ...]:
+    """合并默认 skill 和请求 skill，并保持首次出现顺序去重。"""
     merged: list[str] = []
     seen: set[str] = set()
     for name in (*default_names, *request_names):

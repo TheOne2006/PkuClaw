@@ -1,3 +1,4 @@
+"""提供不绑定具体聊天渠道的 AgentEvent sink 实现。"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -13,6 +14,7 @@ class SilentSink(AgentEventSink):
     events: list[AgentEvent] = field(default_factory=list)
 
     def emit(self, event: AgentEvent) -> None:
+        """接收并处理一条 AgentEvent。"""
         self.events.append(event)
         if event.kind in {"started", "final", "error"}:
             log.event(

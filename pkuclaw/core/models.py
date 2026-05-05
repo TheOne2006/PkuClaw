@@ -1,3 +1,4 @@
+"""CoreRuntime、AgentWrapper 和 channel 之间共享的数据模型。"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -9,6 +10,7 @@ from pkuclaw.channels.base import ChannelTarget
 
 @dataclass(frozen=True)
 class CoreDispatch:
+    """CoreRuntime 对一次 channel/loop 输入的调度结果。"""
     reply_text: str
     run_id: str | None = None
     plan: "TaskPlan | None" = None
@@ -19,6 +21,7 @@ class CoreDispatch:
 
 @dataclass(frozen=True)
 class TaskPlan:
+    """路由器为 Agent run 选择出的意图、skills 和用户提示。"""
     intent: str
     skill_names: tuple[str, ...]
     ack: str
@@ -27,6 +30,7 @@ class TaskPlan:
 
 @dataclass(frozen=True)
 class AgentSettings:
+    """Agent provider、模式、模型和 reasoning 的可覆盖配置。"""
     provider: str | None = None
     mode: str | None = None
     model: str | None = None
@@ -35,6 +39,7 @@ class AgentSettings:
 
 @dataclass(frozen=True)
 class AgentRunRequest:
+    """CoreRuntime 交给 AgentWrapper 的规范化运行请求。"""
     source: str
     conversation_id: str
     text: str
@@ -48,6 +53,7 @@ class AgentRunRequest:
 
 @dataclass(frozen=True)
 class AgentResult:
+    """具体 Agent provider 执行结束后的统一结果。"""
     run_id: str
     status: str
     response_text: str
@@ -58,6 +64,7 @@ class AgentResult:
 
 @dataclass(frozen=True)
 class AgentEvent:
+    """provider 输出给 channel sink 的结构化事件。"""
     run_id: str
     kind: str
     message: str
@@ -66,6 +73,7 @@ class AgentEvent:
 
 
 class AgentEventSink(Protocol):
+    """接收 AgentEvent 的 channel-neutral 协议。"""
     def emit(self, event: AgentEvent) -> None:
         """Receive a structured, channel-neutral agent event."""
 
@@ -74,6 +82,7 @@ def merge_agent_settings(
     defaults: AgentSettings,
     overrides: AgentSettings,
 ) -> AgentSettings:
+    """按会话覆盖优先、runtime 默认兜底的顺序合并 Agent 设置。"""
     return AgentSettings(
         provider=overrides.provider or defaults.provider or "codex",
         mode=overrides.mode or defaults.mode or "standard",

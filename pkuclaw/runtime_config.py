@@ -1,3 +1,4 @@
+"""热加载 runtime.json，并提供带校验、备份、原子写入的配置更新。"""
 from __future__ import annotations
 
 import copy
@@ -21,12 +22,14 @@ SUPPORTED_SCHEMA_VERSION = 1
 
 @dataclass(frozen=True)
 class RuntimeCodexConfig:
+    """runtime.json 中可热加载的 Codex 配置覆盖。"""
     sandbox: str | None = None
     timeout_seconds: int | None = None
 
 
 @dataclass(frozen=True)
 class RuntimeLoopConfig:
+    """runtime.json 中一条周期任务 loop spec。"""
     id: str = "sync_notices"
     enabled: bool = True
     interval_seconds: int | None = None
@@ -43,17 +46,20 @@ class RuntimeLoopConfig:
 
 @dataclass(frozen=True)
 class RuntimePromptConfig:
+    """runtime.json 中的 prompt fragment 和默认 skill 配置。"""
     fragment_paths: tuple[str, ...] = ()
     default_skill_names: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
 class RuntimeNotificationConfig:
+    """runtime.json 中的通知策略配置。"""
     policy: str = "important_only"
 
 
 @dataclass(frozen=True)
 class RuntimePermissionConfig:
+    """runtime.json 中限制 Agent 写配置的权限开关。"""
     agent_can_update_runtime: bool = True
     agent_can_add_loop: bool = True
     agent_can_modify_boot_config: bool = False
@@ -61,6 +67,7 @@ class RuntimePermissionConfig:
 
 @dataclass(frozen=True)
 class RuntimeConfig:
+    """校验后的 runtime.json 快照。"""
     path: Path
     schema_version: int
     agent: AgentSettings
@@ -74,6 +81,7 @@ class RuntimeConfig:
 
 @dataclass(frozen=True)
 class RuntimeConfigWriteResult:
+    """一次安全写 runtime.json 后的结果和审计摘要。"""
     action: str
     file: Path
     backup_path: Path | None
@@ -94,10 +102,12 @@ class RuntimeConfigStore:
 
     @property
     def path(self) -> Path:
+        """执行 path 逻辑。"""
         return self.config_dir / RUNTIME_CONFIG_FILE
 
     @property
     def backups_dir(self) -> Path:
+        """执行 backups dir 逻辑。"""
         return self.config_dir / RUNTIME_BACKUP_DIR
 
     def read_snapshot(self) -> RuntimeConfig:
@@ -107,6 +117,8 @@ class RuntimeConfigStore:
             try:
                 config = self._read_valid()
             except Exception as exc:
+                # Broken live config must not take down the daemon; keep serving
+                # with the previous validated snapshot and surface a warning.
                 warning = f"runtime config fallback: {exc}"
                 base = self._last_valid or _default_config(self.path)
                 return _with_warning(base, warning)
@@ -114,6 +126,7 @@ class RuntimeConfigStore:
             return config
 
     def list_loops(self) -> tuple[RuntimeLoopConfig, ...]:
+        """读取当前 runtime snapshot 中的 loop specs。"""
         return self.read_snapshot().loops
 
     def write_runtime_patch(
@@ -138,6 +151,7 @@ class RuntimeConfigStore:
             )
 
     def add_loop(self, loop: Mapping[str, Any]) -> RuntimeConfigWriteResult:
+        """校验新 loop，避免重复 id，然后走安全提交路径写入 runtime.json。"""
         if not isinstance(loop, Mapping):
             raise RuntimeError("loop must be an object")
         normalized_loop = _loop_config_to_raw(_parse_loop(loop, index=0, seen=set()))
@@ -161,6 +175,7 @@ class RuntimeConfigStore:
         *,
         action: str = "runtime_update_loop",
     ) -> RuntimeConfigWriteResult:
+        """合并单个 loop 的允许字段，重新校验后安全写入。"""
         loop_id = _validate_loop_id_value(loop_id)
         if not isinstance(updates, Mapping):
             raise RuntimeError("loop updates must be an object")
@@ -196,6 +211,7 @@ class RuntimeConfigStore:
             )
 
     def enable_loop(self, loop_id: str) -> RuntimeConfigWriteResult:
+        """把指定 loop 的 enabled 字段设为 true。"""
         return self.update_loop(
             loop_id,
             {"enabled": True},
@@ -203,6 +219,7 @@ class RuntimeConfigStore:
         )
 
     def disable_loop(self, loop_id: str) -> RuntimeConfigWriteResult:
+        """把指定 loop 的 enabled 字段设为 false。"""
         return self.update_loop(
             loop_id,
             {"enabled": False},
@@ -232,6 +249,8 @@ class RuntimeConfigStore:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             tmp_path = self.path.with_name(f"{self.path.name}.tmp")
             try:
+                # fsync the temporary file before os.replace so a crash does not
+                # leave a zero-length or partially-written runtime.json.
                 with tmp_path.open("w", encoding="utf-8") as handle:
                     handle.write(_json_text(data))
                     handle.flush()
@@ -243,9 +262,11 @@ class RuntimeConfigStore:
                     tmp_path.unlink()
 
     def validate_config(self, raw: Mapping[str, Any]) -> RuntimeConfig:
+        """校验原始 runtime config 对象并返回规范化 RuntimeConfig。"""
         return _parse_config(raw, path=self.path)
 
     def _read_valid(self) -> RuntimeConfig:
+        """读取 valid 相关逻辑。"""
         if not self.path.exists():
             raise FileNotFoundError(f"runtime config not found: {self.path}")
         raw = json.loads(self.path.read_text(encoding="utf-8"))
@@ -260,6 +281,9 @@ class RuntimeConfigStore:
         action: str,
         diff_summary: str,
     ) -> RuntimeConfigWriteResult:
+        """对候选配置执行校验、规范化、备份、原子写入和 last_valid 更新。"""
+        # Validate before touching disk, then write the normalized representation
+        # so future diffs and hashes are stable.
         validated = self.validate_config(candidate)
         normalized = _config_to_raw(validated)
         old_hash = _hash_file(self.path)
@@ -297,10 +321,12 @@ _LOOP_UPDATE_KEYS = {
 
 
 def _default_config(path: Path) -> RuntimeConfig:
+    """根据内置默认 raw config 构造 RuntimeConfig。"""
     return _parse_config(_default_raw_config(), path=path)
 
 
 def _with_warning(config: RuntimeConfig, warning: str) -> RuntimeConfig:
+    """复制 RuntimeConfig 并附加一条 fallback warning。"""
     return RuntimeConfig(
         path=config.path,
         schema_version=config.schema_version,
@@ -315,6 +341,7 @@ def _with_warning(config: RuntimeConfig, warning: str) -> RuntimeConfig:
 
 
 def _parse_config(raw: Mapping[str, Any], *, path: Path) -> RuntimeConfig:
+    """解析并校验 runtime.json 根对象。"""
     if not isinstance(raw, Mapping):
         raise RuntimeError("runtime config must be a JSON object")
 
@@ -373,6 +400,7 @@ def _parse_config(raw: Mapping[str, Any], *, path: Path) -> RuntimeConfig:
 
 
 def _schema_version(raw: Mapping[str, Any]) -> int:
+    """读取并校验 schema_version。"""
     value = raw.get("schema_version", SUPPORTED_SCHEMA_VERSION)
     if not isinstance(value, int):
         raise RuntimeError("runtime config value schema_version must be an integer")
@@ -385,6 +413,7 @@ def _schema_version(raw: Mapping[str, Any]) -> int:
 
 
 def _read_loops(raw: Mapping[str, Any]) -> tuple[RuntimeLoopConfig, ...]:
+    """读取 runtime loops，缺省时使用内置默认 loop。"""
     value = raw.get("loops")
     if value is None:
         return _default_loops()
@@ -405,6 +434,7 @@ def _parse_loop(
     index: int,
     seen: set[str],
 ) -> RuntimeLoopConfig:
+    """解析并校验一条 runtime loop spec。"""
     loop_id = _required_str(item, "id")
     if loop_id in seen:
         raise RuntimeError(f"duplicate runtime loop id: {loop_id}")
@@ -419,6 +449,8 @@ def _parse_loop(
     if any(value is not None for value in target_values) and not all(
         value is not None for value in target_values
     ):
+        # Partial targets are rejected because MCP notification tools need all
+        # three fields to address a channel destination reliably.
         raise RuntimeError(
             "runtime loop default target requires default_channel, "
             "default_target_type, and default_target_id"
@@ -443,6 +475,7 @@ def _parse_loop(
 
 
 def _default_loops() -> tuple[RuntimeLoopConfig, ...]:
+    """返回内置默认 sync_notices loop。"""
     return (
         RuntimeLoopConfig(
             id="sync_notices",
@@ -458,6 +491,7 @@ def _default_loops() -> tuple[RuntimeLoopConfig, ...]:
 
 
 def _default_raw_config() -> dict[str, Any]:
+    """返回可写入磁盘的内置默认 runtime.json。"""
     return {
         "schema_version": SUPPORTED_SCHEMA_VERSION,
         "agent": {
@@ -487,6 +521,7 @@ def _default_raw_config() -> dict[str, Any]:
 
 
 def _config_to_raw(config: RuntimeConfig) -> dict[str, Any]:
+    """把 RuntimeConfig 规范化为 JSON 可序列化对象。"""
     return {
         "schema_version": config.schema_version,
         "agent": {
@@ -516,6 +551,7 @@ def _config_to_raw(config: RuntimeConfig) -> dict[str, Any]:
 
 
 def _loop_config_to_raw(loop: RuntimeLoopConfig) -> dict[str, Any]:
+    """把 RuntimeLoopConfig 规范化为 JSON 可序列化对象。"""
     return {
         "id": loop.id,
         "enabled": loop.enabled,
@@ -533,6 +569,7 @@ def _loop_config_to_raw(loop: RuntimeLoopConfig) -> dict[str, Any]:
 
 
 def _section(raw: Mapping[str, Any], key: str) -> dict[str, Any]:
+    """读取 runtime config section，并确保它是对象。"""
     value = raw.get(key, {})
     if not isinstance(value, dict):
         raise RuntimeError(f"runtime config section {key} must be an object")
@@ -540,6 +577,7 @@ def _section(raw: Mapping[str, Any], key: str) -> dict[str, Any]:
 
 
 def _required_str(section: Mapping[str, Any], key: str) -> str:
+    """读取必填字符串字段，不合法时抛出 RuntimeError。"""
     value = section.get(key)
     if not isinstance(value, str) or not value.strip():
         raise RuntimeError(f"runtime config value {key} is required")
@@ -547,6 +585,7 @@ def _required_str(section: Mapping[str, Any], key: str) -> str:
 
 
 def _optional_str(section: Mapping[str, Any], key: str) -> str | None:
+    """读取可选字符串字段，并把空白字符串归一为空值。"""
     value = section.get(key)
     if value is None:
         return None
@@ -557,6 +596,7 @@ def _optional_str(section: Mapping[str, Any], key: str) -> str | None:
 
 
 def _optional_int(section: Mapping[str, Any], key: str) -> int | None:
+    """读取可选整数字段。"""
     value = section.get(key)
     if value is None:
         return None
@@ -571,6 +611,7 @@ def _positive_int_or_default(
     *,
     default: int,
 ) -> int:
+    """读取正整数字段，缺省时使用默认值。"""
     value = _optional_int(section, key)
     if value is None:
         return default
@@ -580,6 +621,7 @@ def _positive_int_or_default(
 
 
 def _optional_bool(section: Mapping[str, Any], key: str, *, default: bool) -> bool:
+    """读取布尔字段，不合法时抛出 RuntimeError。"""
     value = section.get(key, default)
     if not isinstance(value, bool):
         raise RuntimeError(f"runtime config value {key} must be a boolean")
@@ -587,6 +629,7 @@ def _optional_bool(section: Mapping[str, Any], key: str, *, default: bool) -> bo
 
 
 def _optional_str_tuple(section: Mapping[str, Any], key: str) -> tuple[str, ...]:
+    """读取字符串数组并转换成 tuple。"""
     value = section.get(key)
     if value is None:
         return ()
@@ -603,12 +646,14 @@ def _optional_str_tuple(section: Mapping[str, Any], key: str) -> tuple[str, ...]
 
 
 def _validate_loop_id_value(value: str) -> str:
+    """校验 loop_id 字符串非空。"""
     if not isinstance(value, str) or not value.strip():
         raise RuntimeError("loop_id is required")
     return value.strip()
 
 
 def _object_list(raw: Mapping[str, Any], key: str) -> list[dict[str, Any]]:
+    """读取对象数组并返回深拷贝，避免原对象被修改。"""
     value = raw.get(key, [])
     if not isinstance(value, list):
         raise RuntimeError(f"runtime config value {key} must be an array")
@@ -621,6 +666,7 @@ def _object_list(raw: Mapping[str, Any], key: str) -> list[dict[str, Any]]:
 
 
 def _deep_merge(base: Mapping[str, Any], patch: Mapping[str, Any]) -> dict[str, Any]:
+    """递归深度合并 JSON-like mapping。"""
     result = copy.deepcopy(dict(base))
     for key, value in patch.items():
         current = result.get(key)
@@ -632,6 +678,7 @@ def _deep_merge(base: Mapping[str, Any], patch: Mapping[str, Any]) -> dict[str, 
 
 
 def _patch_diff_summary(action: str, patch: Mapping[str, Any]) -> str:
+    """生成 runtime patch 的简短审计摘要。"""
     keys = sorted(str(key) for key in patch.keys())
     return f"{action} keys={','.join(keys) or 'none'}"
 
@@ -641,6 +688,7 @@ def _loop_update_summary(
     loop_id: str,
     updates: Mapping[str, Any],
 ) -> str:
+    """生成 loop 更新操作的简短审计摘要。"""
     changed_keys = sorted(str(key) for key in updates.keys() if key != "id")
     if action == "runtime_enable_loop":
         return f"enable loop {loop_id}"
@@ -650,20 +698,24 @@ def _loop_update_summary(
 
 
 def _json_text(data: Mapping[str, Any]) -> str:
+    """用稳定缩进格式序列化 JSON 文本。"""
     return json.dumps(data, ensure_ascii=False, indent=2) + "\n"
 
 
 def _hash_file(path: Path) -> str | None:
+    """计算文件 SHA-256，不存在时返回 None。"""
     if not path.exists():
         return None
     return _hash_bytes(path.read_bytes())
 
 
 def _hash_bytes(data: bytes) -> str:
+    """计算字节串 SHA-256。"""
     return hashlib.sha256(data).hexdigest()
 
 
 def _fsync_directory(path: Path) -> None:
+    """fsync 目录项，尽量保证 rename 持久化。"""
     if not hasattr(os, "O_DIRECTORY"):
         return
     fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)

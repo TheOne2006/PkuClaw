@@ -1,3 +1,4 @@
+"""daemon 命令的薄入口，委托 runtime bootstrap 启动完整服务图。"""
 from __future__ import annotations
 
 from pkuclaw.config import Settings

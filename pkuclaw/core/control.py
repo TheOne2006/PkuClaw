@@ -1,3 +1,4 @@
+"""解析聊天文本或菜单 key 中的本地控制命令。"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -12,6 +13,7 @@ MODE_LABELS = {
 
 @dataclass(frozen=True)
 class ControlCommand:
+    """本地控制命令的规范化表示。"""
     kind: str
     value: str | None = None
 
@@ -21,6 +23,7 @@ def parse_control_command(
     text: str = "",
     event_key: str | None = None,
 ) -> ControlCommand | None:
+    """把菜单 key 或聊天文本识别为本地控制命令。"""
     raw_key = (event_key or "").strip()
     key = raw_key.lower()
     if key:
@@ -66,4 +69,5 @@ def parse_control_command(
 
 
 def mode_label(mode: str) -> str:
+    """把内部 mode 名称转换成用户可读标签。"""
     return MODE_LABELS.get(mode, mode)

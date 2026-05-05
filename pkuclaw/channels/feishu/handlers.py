@@ -1,3 +1,4 @@
+"""飞书事件回调处理器：消息、菜单、卡片按钮和 Agent run 启动。"""
 from __future__ import annotations
 
 import threading
@@ -33,10 +34,12 @@ from .ids import short_id
 
 @dataclass
 class ChatLocks:
+    """按飞书 chat_id 维护串行化锁，避免同一聊天内并发刷卡。"""
     locks: dict[str, threading.Lock] = field(default_factory=dict)
     guard: threading.Lock = field(default_factory=threading.Lock)
 
     def for_chat(self, chat_id: str) -> threading.Lock:
+        """执行 for chat 逻辑。"""
         with self.guard:
             if chat_id not in self.locks:
                 self.locks[chat_id] = threading.Lock()
@@ -45,6 +48,7 @@ class ChatLocks:
 
 @dataclass
 class FeishuEventHandlers:
+    """飞书 SDK 回调对象，负责把平台事件转入 CoreRuntime。"""
     settings: Settings
     core_runtime: CoreRuntime
     message_client: FeishuCardKitClient
@@ -55,6 +59,7 @@ class FeishuEventHandlers:
     chat_locks: ChatLocks = field(default_factory=ChatLocks)
 
     def on_message(self, data: Any) -> None:
+        """处理飞书文本消息，分流本地控制命令或启动 realtime Agent run。"""
         event = getattr(data, "event", None)
         message = getattr(event, "message", None)
         if message is None or getattr(message, "message_type", None) != "text":
@@ -89,6 +94,8 @@ class FeishuEventHandlers:
         )
         if dispatch.run_id is None or dispatch.plan is None:
             reply_target = dispatch.channel_target or target
+            # Local controls (mode/status/recent runs) return immediately as a
+            # control card and never consume an Agent worker.
             send_control_card(
                 message_client=self.message_client,
                 renderer=self.card_renderer,
@@ -114,6 +121,8 @@ class FeishuEventHandlers:
         try:
             sink.start()
         except Exception as exc:
+            # If the user-facing card cannot be created, mark the queued run
+            # failed before re-raising so Store state never remains "queued".
             self.core_runtime.store.mark_run_failed(dispatch.run_id, str(exc))
             log.fail(
                 "failed to create Feishu run card: "
@@ -124,6 +133,8 @@ class FeishuEventHandlers:
         self.executor.submit(
             process_code_agent_run,
             self.core_runtime,
+            # Per-chat lock serializes Agent runs for the same Feishu chat so
+            # streaming cards are easier to follow and resource use is bounded.
             self.chat_locks.for_chat(dispatch.channel_target.target_id),
             dispatch.channel_target.target_id,
             dispatch.run_id,
@@ -133,6 +144,7 @@ class FeishuEventHandlers:
         )
 
     def on_bot_menu(self, data: Any) -> None:
+        """处理飞书机器人菜单事件，并把结果以控制卡返回。"""
         event = getattr(data, "event", None)
         event_key = getattr(event, "event_key", None)
         operator = getattr(event, "operator", None)
@@ -174,6 +186,7 @@ class FeishuEventHandlers:
         log.ok(f"menu card sent: key={event_key}, sender={short_id(open_id)}")
 
     def on_card_action(self, data: Any) -> Any:
+        """处理运行详情翻页等飞书卡片按钮回调。"""
         event = getattr(data, "event", None)
         value = card_action_value(event)
         action = str(value.get("action") or "")
@@ -218,6 +231,7 @@ class FeishuEventHandlers:
         )
 
     def _toast(self, *, toast_type: str, content: str) -> Any:
+        """构造飞书卡片按钮回调 toast。"""
         return card_action_toast(
             self.card_action_response_cls,
             toast_type=toast_type,
@@ -234,6 +248,7 @@ def process_code_agent_run(
     agent_request: Any,
     sink: FeishuRunCardSink,
 ) -> None:
+    """执行 process code agent run 逻辑。"""
     with lock:
         try:
             log.stage(

@@ -1,3 +1,4 @@
+"""组装飞书 websocket gateway，并把它连接到 CoreRuntime。"""
 from __future__ import annotations
 
 from concurrent.futures import Executor
@@ -119,6 +120,7 @@ def build_feishu_realtime_gateway(
 
 
 def _log_gateway(settings: Settings) -> None:
+    """输出飞书 gateway 启动配置摘要。"""
     log.stage("Booting Feishu realtime gateway")
     log.startup_table(
         "Feishu",
@@ -131,6 +133,7 @@ def _log_gateway(settings: Settings) -> None:
 
 
 def _require_websocket_mode(settings: Settings) -> None:
+    """限制当前飞书 adapter 只支持 websocket 模式。"""
     if settings.feishu.event_mode == "websocket":
         return
     raise RuntimeError(f"unsupported Feishu event mode: {settings.feishu.event_mode}")

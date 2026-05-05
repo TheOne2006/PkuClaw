@@ -1,3 +1,4 @@
+"""把 channel-neutral 的运行状态渲染为飞书 CardKit JSON。"""
 from __future__ import annotations
 
 import time
@@ -20,6 +21,7 @@ from .schema import (
 
 
 class FeishuCardRenderer:
+    """飞书运行卡、详情卡和控制卡的 JSON 渲染器。"""
     def streaming_answer_card(
         self,
         *,
@@ -27,6 +29,7 @@ class FeishuCardRenderer:
         answer_text: str,
         started_at: float,
     ) -> dict[str, Any]:
+        """渲染运行中的流式回答卡片。"""
         elapsed = duration_text(started_at, time.monotonic())
         return base_card(
             title="PkuClaw 正在回复",
@@ -55,6 +58,7 @@ class FeishuCardRenderer:
         started_at: float,
         finished_at: float,
     ) -> dict[str, Any]:
+        """渲染运行结束或失败后的最终回答卡片。"""
         needs_user = response_text.lstrip().startswith("QUESTION:")
         template = "orange" if needs_user else "green"
         title = "PkuClaw 需要你确认" if needs_user else "PkuClaw 已完成"
@@ -90,6 +94,7 @@ class FeishuCardRenderer:
         events: list[str],
         page: int,
     ) -> dict[str, Any]:
+        """渲染 Codex artifacts 和事件分页详情卡。"""
         total_pages = max(1, (len(events) + DETAIL_PAGE_SIZE - 1) // DETAIL_PAGE_SIZE)
         page = max(0, min(page, total_pages - 1))
         start = page * DETAIL_PAGE_SIZE
@@ -139,6 +144,7 @@ class FeishuCardRenderer:
         body: str,
         template: str = "blue",
     ) -> dict[str, Any]:
+        """渲染简单控制/状态回复卡。"""
         return base_card(
             title=title,
             template=template,

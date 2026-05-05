@@ -1,3 +1,4 @@
+"""Codex CLI provider：启动 codex exec、归一化事件并读取结果。"""
 from __future__ import annotations
 
 import json
@@ -19,6 +20,7 @@ from pkuclaw.core.models import (
 )
 
 class CodexAgent:
+    """通过 codex exec --json 执行 PkuClaw prompt 的 Agent provider。"""
     name = "codex"
 
     def __init__(
@@ -36,6 +38,7 @@ class CodexAgent:
         prompt: str,
         sink: AgentEventSink,
     ) -> AgentResult:
+        """执行一次 Codex run，处理启动事件、CLI 返回码、结果文件和 session id。"""
         run = context.run
         agent_settings = context.agent_settings
         paths = context.paths
@@ -64,6 +67,8 @@ class CodexAgent:
             ),
         )
 
+        # Codex may create a new thread without printing its id directly; keep a
+        # before/after snapshot so we can persist the session id for later resume.
         before_sessions = _read_session_index()
         command = self._build_command(
             session_id=context.conversation.agent_session_id,
@@ -145,6 +150,8 @@ class CodexAgent:
             before_sessions=before_sessions,
             stdout=stdout,
         )
+        # Prefer the explicit result file written by `codex exec -o`; stdout is
+        # only a fallback for older/partial CLI event streams.
         response_text = _read_result_text(paths.result_path, stdout)
         if session_id:
             log.ok(f"Codex thread ready: {session_id}")
@@ -186,6 +193,7 @@ class CodexAgent:
         sink: AgentEventSink,
         run_id: str,
     ) -> tuple[str, int]:
+        """启动 Codex CLI 并实时消费 stdout JSONL，转发为 AgentEvent。"""
         stdout_lines: list[str] = []
         with (
             stdout_path.open("w", encoding="utf-8") as stdout_file,
@@ -205,9 +213,12 @@ class CodexAgent:
             process.stdin.write(prompt)
             process.stdin.close()
 
+            # stdout is consumed on a reader thread because the main loop also
+            # enforces the overall timeout and forwards events to the sink.
             lines: queue.Queue[str | None] = queue.Queue()
 
             def read_stdout() -> None:
+                """在后台线程中读取子进程 stdout，并用 None 标记流结束。"""
                 try:
                     for line in process.stdout:
                         lines.put(line)
@@ -246,6 +257,8 @@ class CodexAgent:
                     stdout_file.write(line)
                     stdout_file.flush()
                     stdout_lines.append(line)
+                    # Persist each Codex JSONL line verbatim first, then normalize
+                    # it into a channel-neutral AgentEvent for UI sinks.
                     event = _codex_json_line_to_agent_event(run_id, line)
                     if event is not None:
                         _emit_agent_event(sink, event)
@@ -265,6 +278,7 @@ class CodexAgent:
         agent_settings: AgentSettings,
         runtime: Any,
     ) -> list[str]:
+        """根据是否已有 session 拼出 codex exec/resume 命令行。"""
         command = [self.settings.codex.bin, "exec"]
         if session_id:
             command.extend(["resume", "--json", "-o", str(result_path)])
@@ -294,6 +308,7 @@ class CodexAgent:
         command: list[str],
         agent_settings: AgentSettings,
     ) -> None:
+        """把 model 和 reasoning 选项追加到 Codex 命令行。"""
         model = self._effective_model(agent_settings)
         if model:
             command.extend(["-m", model])
@@ -302,6 +317,7 @@ class CodexAgent:
             command.extend(["-c", f'model_reasoning_effort="{reasoning}"'])
 
     def _append_mcp_server(self, command: list[str]) -> None:
+        """把 daemon MCP server URL 注入 Codex 配置。"""
         url = f"http://{self.settings.mcp.host}:{self.settings.mcp.port}/mcp"
         command.extend(
             [
@@ -311,9 +327,11 @@ class CodexAgent:
         )
 
     def _effective_model(self, agent_settings: AgentSettings) -> str | None:
+        """合并会话/runtime 和启动配置后的 Codex model。"""
         return agent_settings.model or self.settings.codex.model
 
     def _effective_reasoning(self, agent_settings: AgentSettings) -> str | None:
+        """合并显式 reasoning 或 mode 映射后的 Codex reasoning effort。"""
         if agent_settings.reasoning_effort:
             return agent_settings.reasoning_effort
         return {
@@ -323,14 +341,17 @@ class CodexAgent:
         }.get(agent_settings.mode)
 
     def _effective_sandbox(self, runtime: Any) -> str:
+        """合并 runtime 和启动配置后的 Codex sandbox。"""
         return runtime.codex.sandbox or self.settings.codex.sandbox
 
     def _effective_timeout(self, runtime: Any) -> int:
+        """合并 runtime 和启动配置后的 Codex 超时时间。"""
         return runtime.codex.timeout_seconds or self.settings.codex.timeout_seconds
 
 
 
 def _read_session_index() -> list[dict[str, Any]]:
+    """读取 Codex 本地 session_index.jsonl，无法读取时返回空列表。"""
     path = Path.home() / ".codex" / "session_index.jsonl"
     if not path.exists():
         return []
@@ -349,6 +370,7 @@ def _emit_agent_event(
     sink: AgentEventSink,
     event: AgentEvent,
 ) -> None:
+    """隔离 channel sink 异常，避免 UI 更新失败打断 provider。"""
     try:
         sink.emit(event)
     except Exception as exc:  # pragma: no cover - defensive channel isolation
@@ -359,6 +381,7 @@ def _codex_json_line_to_agent_event(
     run_id: str,
     line: str,
 ) -> AgentEvent | None:
+    """把 Codex JSONL 事件归一化为 PkuClaw AgentEvent。"""
     try:
         data = json.loads(line)
     except json.JSONDecodeError:
@@ -438,6 +461,7 @@ def _codex_json_line_to_agent_event(
 
 
 def _codex_item_type(data: dict[str, Any]) -> str:
+    """从 Codex event 的 item 字段提取 item type。"""
     item = data.get("item")
     if not isinstance(item, dict):
         return ""
@@ -445,6 +469,7 @@ def _codex_item_type(data: dict[str, Any]) -> str:
 
 
 def _is_codex_assistant_output(event_type: str, item_type: str) -> bool:
+    """判断 Codex 事件是否应视为 assistant 输出。"""
     lowered_event = event_type.lower()
     lowered_item = item_type.lower()
     return (
@@ -458,6 +483,7 @@ def _is_codex_assistant_output(event_type: str, item_type: str) -> bool:
 
 
 def _phase_from_codex_event_type(event_type: str, *, item_type: str = "") -> str:
+    """把 Codex event/item 类型映射成 PkuClaw phase。"""
     lowered_item = item_type.lower()
     if lowered_item == "agent_message":
         return "output"
@@ -478,6 +504,7 @@ def _phase_from_codex_event_type(event_type: str, *, item_type: str = "") -> str
 
 
 def _timeout_output(exc: subprocess.TimeoutExpired) -> str:
+    """从 TimeoutExpired 中提取 stdout/output 文本。"""
     output = getattr(exc, "stdout", None) or getattr(exc, "output", None) or ""
     if isinstance(output, bytes):
         return output.decode("utf-8", errors="replace")
@@ -485,12 +512,14 @@ def _timeout_output(exc: subprocess.TimeoutExpired) -> str:
 
 
 def _read_text_if_exists(path: Path) -> str:
+    """读取文本文件；文件不存在时返回空字符串。"""
     if not path.exists():
         return ""
     return path.read_text(encoding="utf-8", errors="replace")
 
 
 def _kill_process(process: subprocess.Popen[str]) -> None:
+    """尽力终止子进程，忽略终止过程中的异常。"""
     try:
         process.kill()
     except Exception:
@@ -498,6 +527,7 @@ def _kill_process(process: subprocess.Popen[str]) -> None:
 
 
 def _shorten(text: str, limit: int) -> str:
+    """压缩空白并截断为单行短文本。"""
     compact = " ".join(text.split())
     if len(compact) <= limit:
         return compact
@@ -505,6 +535,7 @@ def _shorten(text: str, limit: int) -> str:
 
 
 def _truncate_markdown(text: str, limit: int) -> str:
+    """截断 Markdown 正文，适合 channel 卡片展示。"""
     content = text.strip()
     if len(content) <= limit:
         return content
@@ -512,6 +543,7 @@ def _truncate_markdown(text: str, limit: int) -> str:
 
 
 def _truncate_output_text(text: str, limit: int, *, preserve_edges: bool) -> str:
+    """根据是否 delta 事件决定是否保留边缘空白后截断输出。"""
     content = text if preserve_edges else text.strip()
     if len(content) <= limit:
         return content
@@ -523,6 +555,7 @@ def _detect_new_session_id(
     before_sessions: list[dict[str, Any]],
     stdout: str,
 ) -> str | None:
+    """比较执行前后的 Codex session index，并回退扫描 stdout。"""
     before_ids = {item.get("id") for item in before_sessions}
     after_sessions = _read_session_index()
     new_sessions = [item for item in after_sessions if item.get("id") not in before_ids]
@@ -532,6 +565,7 @@ def _detect_new_session_id(
 
 
 def _find_session_id_in_jsonl(stdout: str) -> str | None:
+    """从 Codex stdout JSONL 中查找 session/thread id。"""
     for line in stdout.splitlines():
         try:
             data = json.loads(line)
@@ -547,6 +581,7 @@ def _find_session_id_in_jsonl(stdout: str) -> str | None:
 
 
 def _find_key_recursive(value: Any, keys: set[str]) -> Any:
+    """在嵌套 dict/list 中深度查找任一候选键。"""
     if isinstance(value, dict):
         for key, item in value.items():
             if key in keys:
@@ -563,6 +598,7 @@ def _find_key_recursive(value: Any, keys: set[str]) -> Any:
 
 
 def _read_result_text(result_path: Path, stdout: str) -> str:
+    """优先读取 result.md，缺失时从 stdout 中提取最后文本。"""
     if result_path.exists():
         text = result_path.read_text(encoding="utf-8").strip()
         if text:
@@ -575,6 +611,7 @@ def _read_result_text(result_path: Path, stdout: str) -> str:
 
 
 def _last_text_from_jsonl(stdout: str) -> str | None:
+    """扫描 JSONL 并返回最后一段文本字段。"""
     last_text: str | None = None
     for line in stdout.splitlines():
         try:
@@ -588,5 +625,6 @@ def _last_text_from_jsonl(stdout: str) -> str | None:
 
 
 def _summarize_failure(stderr: str, stdout: str) -> str:
+    """从 stderr/stdout 中截取失败摘要。"""
     combined = (stderr.strip() or stdout.strip() or "Codex failed with no output.")
     return combined[-2000:]

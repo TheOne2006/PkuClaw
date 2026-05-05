@@ -1,3 +1,4 @@
+"""CoreRuntime 控制面，统一 channel、loop、MCP 和 Agent 执行入口。"""
 from __future__ import annotations
 
 from concurrent.futures import Executor
@@ -52,6 +53,7 @@ class CoreRuntime:
 
     @property
     def channel_backends(self) -> Mapping[str, ChannelOutboundBackend]:
+        """执行 channel backends 逻辑。"""
         return MappingProxyType(self._channel_backends)
 
     def register_channel_backend(self, backend: ChannelOutboundBackend) -> None:
@@ -67,6 +69,7 @@ class CoreRuntime:
         self.loop_manager = loop_manager
 
     def channel_backend(self, channel: str) -> ChannelOutboundBackend:
+        """按 channel 名称读取已注册的 outbox backend。"""
         try:
             return self._channel_backends[channel]
         except KeyError as exc:
@@ -80,6 +83,7 @@ class CoreRuntime:
         target_id: str,
         text: str,
     ) -> ChannelOutboundResult:
+        """通过指定 channel backend 发送文本消息。"""
         target = ChannelTarget(
             channel=channel,
             target_type=target_type,
@@ -95,6 +99,7 @@ class CoreRuntime:
         target_id: str,
         card: dict[str, Any],
     ) -> ChannelOutboundResult:
+        """通过指定 channel backend 发送结构化卡片。"""
         target = ChannelTarget(
             channel=channel,
             target_type=target_type,
@@ -110,6 +115,7 @@ class CoreRuntime:
         target_id: str,
         image_path: str,
     ) -> ChannelOutboundResult:
+        """通过指定 channel backend 发送图片。"""
         target = ChannelTarget(
             channel=channel,
             target_type=target_type,
@@ -128,6 +134,7 @@ class CoreRuntime:
         card: dict[str, Any],
         sequence: int,
     ) -> ChannelOutboundResult:
+        """通过指定 channel backend 更新外部卡片。"""
         return self.channel_backend(channel).update_card(
             card_id=card_id,
             card=card,
@@ -244,6 +251,7 @@ class CoreRuntime:
         )
 
     def _ensure_runtime_write_allowed(self, *, add_loop: bool) -> None:
+        """根据 runtime permissions 判断 Agent 是否允许写配置。"""
         permissions = self.runtime_config.read_snapshot().permissions
         if add_loop and not permissions.agent_can_add_loop:
             raise RuntimeError("runtime policy denies adding loops")
@@ -257,6 +265,7 @@ class CoreRuntime:
         actor: str,
         run_id: str | None,
     ) -> dict[str, Any]:
+        """把 RuntimeConfigStore 写入结果记录到 Store 审计表。"""
         audit_id = self.store.record_runtime_change(
             run_id=run_id,
             actor=actor,
@@ -297,6 +306,8 @@ class CoreRuntime:
         """Ingest one normalized channel message through the runtime control plane."""
         command = parse_control_command(text=message.text, event_key=message.event_key)
         if command is not None:
+            # Control commands are daemon-local mutations/reads, so they bypass
+            # AgentWrapper and return a direct channel reply.
             reply = self._handle_control(
                 conversation_id=message.conversation_id,
                 kind=command.kind,
@@ -357,12 +368,15 @@ class CoreRuntime:
         loop_id: str | None = None,
         scheduled_at: str | None = None,
     ) -> CoreDispatch:
+        """从当前 runtime loop spec 创建一条 silent-by-default 的 loop run。"""
         runtime = self.runtime_config.read_snapshot()
         loop = _select_loop(runtime.loops, loop_id=loop_id)
         text = loop.prompt or "Run this configured periodic loop. Stay silent unless important."
         skill_names = loop.skill_names
         scheduled_at = scheduled_at or utc_now()
         target = _loop_default_target(loop)
+        # Loop runs are silent by default; default channel target is only a
+        # notification hint for Agent MCP tools when something important happens.
         channel_context: dict[str, Any] = {
             "loop_id": loop.id,
             "notify_policy": loop.notify_policy,
@@ -414,6 +428,7 @@ class CoreRuntime:
         request: AgentRunRequest,
         sink: AgentEventSink,
     ) -> AgentResult:
+        """把已准备好的 run 委托给 AgentWrapper 执行。"""
         return self.agent_wrapper.run(
             run_id=run_id,
             request=request,
@@ -428,6 +443,7 @@ class CoreRuntime:
         kind: str,
         value: str | None,
     ) -> str:
+        """执行本地控制命令，不启动 Agent。"""
         if kind == "set_provider":
             if value is None:
                 raise RuntimeError("provider value is required")
@@ -514,12 +530,14 @@ class CoreRuntime:
 
 
 def _short_id(value: str) -> str:
+    """内部辅助函数，封装 short id 逻辑。"""
     if len(value) <= 12:
         return value
     return f"{value[:6]}...{value[-4:]}"
 
 
 def _runtime_config_dict(runtime: RuntimeConfig) -> dict[str, Any]:
+    """把 RuntimeConfig 转换为 MCP/状态接口可序列化字典。"""
     return {
         "path": str(runtime.path),
         "schema_version": runtime.schema_version,
@@ -541,6 +559,7 @@ def _runtime_write_result_dict(
     *,
     audit_id: int,
 ) -> dict[str, Any]:
+    """把配置写入结果和审计 ID 转换为 API 响应字典。"""
     return {
         "action": result.action,
         "status": result.status,
@@ -559,6 +578,7 @@ def _runtime_write_result_dict(
 
 
 def _agent_settings_dict(settings: Any) -> dict[str, Any]:
+    """把 AgentSettings 或兼容对象转换为字典。"""
     return {
         "provider": settings.provider,
         "mode": settings.mode,
@@ -568,6 +588,7 @@ def _agent_settings_dict(settings: Any) -> dict[str, Any]:
 
 
 def _loop_config_dict(loop: RuntimeLoopConfig) -> dict[str, Any]:
+    """把 RuntimeLoopConfig 转换为字典。"""
     return {
         "id": loop.id,
         "enabled": loop.enabled,
@@ -585,6 +606,7 @@ def _loop_config_dict(loop: RuntimeLoopConfig) -> dict[str, Any]:
 
 
 def _run_record_dict(run: Any) -> dict[str, Any]:
+    """把 RunRecord 转换为 MCP/状态接口字典。"""
     return {
         "run_id": run.run_id,
         "conversation_id": run.conversation_id,
@@ -604,6 +626,7 @@ def _select_loop(
     *,
     loop_id: str | None,
 ) -> RuntimeLoopConfig:
+    """从 enabled loops 中选择指定 loop 或第一个可用 loop。"""
     enabled = [loop for loop in loops if loop.enabled]
     if loop_id is not None:
         for loop in enabled:
@@ -616,6 +639,7 @@ def _select_loop(
 
 
 def _loop_default_target(loop: RuntimeLoopConfig) -> dict[str, str] | None:
+    """把 loop 默认通知目标转换为 channel target 字典。"""
     if not (
         loop.default_channel
         and loop.default_target_type

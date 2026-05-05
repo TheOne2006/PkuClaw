@@ -1,3 +1,4 @@
+"""CoreRuntime channel outbox 的飞书实现。"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -21,6 +22,7 @@ class FeishuChannelOutboundBackend:
     renderer: FeishuCardRenderer
 
     def send_text(self, *, target: ChannelTarget, text: str) -> ChannelOutboundResult:
+        """发送文本内容。"""
         sent = self.client.send_card(
             receive_id_type=target.target_type,
             receive_id=target.target_id,
@@ -41,6 +43,7 @@ class FeishuChannelOutboundBackend:
         target: ChannelTarget,
         card: dict[str, Any],
     ) -> ChannelOutboundResult:
+        """发送结构化卡片。"""
         sent = self.client.send_card(
             receive_id_type=target.target_type,
             receive_id=target.target_id,
@@ -61,6 +64,7 @@ class FeishuChannelOutboundBackend:
         target: ChannelTarget,
         image_path: str,
     ) -> ChannelOutboundResult:
+        """发送图片内容。"""
         return ChannelOutboundResult(
             ok=False,
             message="Feishu image upload is not implemented in V1",
@@ -79,6 +83,7 @@ class FeishuChannelOutboundBackend:
         card: dict[str, Any],
         sequence: int,
     ) -> ChannelOutboundResult:
+        """更新已发送的卡片。"""
         self.client.update_card(card_id=card_id, card=card, sequence=sequence)
         return ChannelOutboundResult(
             ok=True,

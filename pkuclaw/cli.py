@@ -1,3 +1,4 @@
+"""PkuClaw 命令行入口，负责加载配置并启动 runtime。"""
 from __future__ import annotations
 
 from pathlib import Path

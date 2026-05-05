@@ -1,3 +1,4 @@
+"""构建并发送飞书侧控制卡和运行详情卡。"""
 from __future__ import annotations
 
 from typing import Any
@@ -21,6 +22,7 @@ def send_control_card(
     receive_id: str,
     text: str,
 ) -> None:
+    """发送一张简单控制卡，用于本地命令回复或错误提示。"""
     message_client.send_card(
         receive_id_type=receive_id_type,
         receive_id=receive_id,
@@ -38,6 +40,7 @@ def send_run_detail_card(
     run_id: str,
     page: int,
 ) -> None:
+    """构建运行详情卡并异步发送到飞书目标。"""
     try:
         detail_card = build_run_detail_card(
             settings=settings,
@@ -68,6 +71,7 @@ def build_run_detail_card(
     run_id: str,
     page: int,
 ) -> dict[str, Any]:
+    """读取 Store 和 Codex artifacts，生成运行详情卡 JSON。"""
     run = core_runtime.store.get_run(run_id)
     detail = build_codex_artifact_detail(data_dir=settings.app.data_dir, run=run)
     return renderer.run_detail_card(
@@ -82,6 +86,7 @@ def build_run_detail_card(
 
 
 def agent_context(core_runtime: CoreRuntime, conversation_id: str) -> dict[str, str]:
+    """合并 runtime 和会话覆盖，生成详情卡展示用的 Agent 设置。"""
     conversation = core_runtime.store.ensure_conversation(conversation_id)
     runtime = core_runtime.runtime_config.read_snapshot()
     settings = merge_agent_settings(runtime.agent, conversation.agent_settings)

@@ -1,3 +1,4 @@
+"""轻量意图分类器，用于选择默认 sub-skill 工作流。"""
 from __future__ import annotations
 
 from pkuclaw.core.models import TaskPlan
@@ -47,4 +48,5 @@ def classify_message(text: str) -> TaskPlan:
 
 
 def _contains_any(text: str, needles: tuple[str, ...]) -> bool:
+    """判断文本是否包含任一候选关键词。"""
     return any(needle in text for needle in needles)

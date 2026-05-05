@@ -1,3 +1,4 @@
+"""读取启动期 TOML 配置和环境变量，生成不可变 Settings。"""
 from __future__ import annotations
 
 import os
@@ -14,6 +15,7 @@ DEFAULT_FEISHU_API_BASE = "https://open.feishu.cn"
 
 @dataclass(frozen=True)
 class AppConfig:
+    """应用级启动配置。"""
     name: str
     data_dir: Path
     runtime_config_dir: Path
@@ -22,6 +24,7 @@ class AppConfig:
 
 @dataclass(frozen=True)
 class FeishuConfig:
+    """飞书渠道启动配置和凭据解析策略。"""
     app_id: str
     app_secret: str | None
     app_secret_env: str
@@ -29,6 +32,7 @@ class FeishuConfig:
     api_base: str = DEFAULT_FEISHU_API_BASE
 
     def resolve_app_secret(self) -> str:
+        """优先使用配置中的 secret，否则从指定环境变量读取。"""
         if self.app_secret:
             return self.app_secret
         value = os.environ.get(self.app_secret_env, "").strip()
@@ -41,6 +45,7 @@ class FeishuConfig:
 
 @dataclass(frozen=True)
 class CodexConfig:
+    """Codex provider 的启动期默认配置。"""
     bin: str
     sandbox: str
     model: str | None
@@ -50,11 +55,13 @@ class CodexConfig:
 
 @dataclass(frozen=True)
 class AgentConfig:
+    """启动期默认 Agent provider 配置。"""
     provider: str
 
 
 @dataclass(frozen=True)
 class MonitorConfig:
+    """LoopManager 和旧监控开关使用的启动配置。"""
     scan_interval_seconds: int
     enable_assignments: bool
     enable_announcements: bool
@@ -64,12 +71,14 @@ class MonitorConfig:
 
 @dataclass(frozen=True)
 class McpConfig:
+    """daemon MCP HTTP 服务监听配置。"""
     host: str
     port: int
 
 
 @dataclass(frozen=True)
 class Settings:
+    """启动后传递给 runtime graph 的不可变配置根对象。"""
     config_path: Path
     app: AppConfig
     feishu: FeishuConfig
@@ -80,6 +89,7 @@ class Settings:
 
 
 def load_settings(config_path: Path | None = None) -> Settings:
+    """读取 TOML 启动配置，叠加环境变量后返回 Settings。"""
     path = _resolve_config_path(config_path)
     with path.open("rb") as fh:
         raw = tomllib.load(fh)
@@ -151,6 +161,7 @@ def load_settings(config_path: Path | None = None) -> Settings:
 
 
 def _resolve_config_path(config_path: Path | None) -> Path:
+    """解析显式配置路径或回退到默认/示例配置。"""
     if config_path is not None:
         path = config_path.expanduser()
         if not path.exists():
@@ -166,6 +177,7 @@ def _resolve_config_path(config_path: Path | None) -> Path:
 
 
 def _get_section(raw: dict[str, Any], name: str) -> dict[str, Any]:
+    """读取 TOML section，并确保它是 table。"""
     section = raw.get(name, {})
     if not isinstance(section, dict):
         raise RuntimeError(f"config section [{name}] must be a table")
@@ -173,6 +185,7 @@ def _get_section(raw: dict[str, Any], name: str) -> dict[str, Any]:
 
 
 def _read_str(section: dict[str, Any], key: str, default: str | None = None) -> str:
+    """读取必填或带默认值的字符串配置。"""
     value = section.get(key, default)
     if value is None:
         raise RuntimeError(f"missing config value: {key}")
@@ -182,6 +195,7 @@ def _read_str(section: dict[str, Any], key: str, default: str | None = None) -> 
 
 
 def _read_optional_str(section: dict[str, Any], key: str) -> str | None:
+    """读取可选字符串配置，并把空白视为空。"""
     value = section.get(key)
     if value is None:
         return None
@@ -192,6 +206,7 @@ def _read_optional_str(section: dict[str, Any], key: str) -> str | None:
 
 
 def _read_bool(section: dict[str, Any], key: str, default: bool) -> bool:
+    """读取布尔配置项。"""
     value = section.get(key, default)
     if not isinstance(value, bool):
         raise RuntimeError(f"config value {key} must be a boolean")
@@ -199,6 +214,7 @@ def _read_bool(section: dict[str, Any], key: str, default: bool) -> bool:
 
 
 def _read_int(section: dict[str, Any], key: str, default: int) -> int:
+    """读取整数配置项。"""
     value = section.get(key, default)
     if not isinstance(value, int):
         raise RuntimeError(f"config value {key} must be an integer")

@@ -1,3 +1,4 @@
+"""daemon MCP 工具 schema 注册表和 prompt 文档渲染器。"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -9,6 +10,7 @@ JsonSchema = dict[str, Any]
 
 @dataclass(frozen=True)
 class ToolSchema:
+    """daemon MCP 工具名称、说明、输入 schema 和分类。"""
     name: str
     description: str
     input_schema: JsonSchema
@@ -16,6 +18,7 @@ class ToolSchema:
     unsupported: bool = False
 
     def as_mcp_tool(self) -> dict[str, Any]:
+        """转换成 MCP tools/list 需要的 JSON schema 对象。"""
         return {
             "name": self.name,
             "description": self.description,
@@ -30,6 +33,7 @@ def list_tool_schemas() -> list[dict[str, Any]]:
 
 
 def tool_names() -> tuple[str, ...]:
+    """返回已注册 MCP 工具名。"""
     return tuple(tool.name for tool in TOOL_REGISTRY)
 
 
@@ -72,6 +76,7 @@ def render_tool_prompt() -> str:
 
 
 def _required_args(schema: Mapping[str, Any]) -> tuple[str, ...]:
+    """从 JSON schema 中提取 required 参数名。"""
     value = schema.get("required", ())
     if not isinstance(value, list):
         return ()

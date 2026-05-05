@@ -1,3 +1,4 @@
+"""SQLite 状态层：会话、运行记录、channel 消息和 runtime 变更审计。"""
 from __future__ import annotations
 
 import json
@@ -14,11 +15,13 @@ from pkuclaw.core.models import AgentSettings
 
 
 def utc_now() -> str:
+    """返回带 UTC timezone 的 ISO8601 时间戳。"""
     return datetime.now(timezone.utc).isoformat()
 
 
 @dataclass(frozen=True)
 class Conversation:
+    """持久化会话记录和该会话的 Agent 覆盖设置。"""
     conversation_id: str
     agent_session_id: str | None
     agent_settings: AgentSettings
@@ -28,6 +31,7 @@ class Conversation:
 
 @dataclass(frozen=True)
 class RunRecord:
+    """持久化 Agent run 的核心状态字段。"""
     run_id: str
     conversation_id: str
     status: str
@@ -42,6 +46,7 @@ class RunRecord:
 
 @dataclass(frozen=True)
 class ChannelMessageRecord:
+    """run 与外部 channel 消息 ID 的映射记录。"""
     id: int
     run_id: str
     channel: str
@@ -53,6 +58,7 @@ class ChannelMessageRecord:
 
 @dataclass(frozen=True)
 class RuntimeChangeRecord:
+    """runtime.json 变更审计记录。"""
     id: int
     run_id: str | None
     actor: str
@@ -66,6 +72,7 @@ class RuntimeChangeRecord:
 
 
 class Store:
+    """SQLite 数据访问对象，封装 schema、迁移和查询更新。"""
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
         self._lock = threading.Lock()
@@ -73,7 +80,10 @@ class Store:
         self.init()
 
     def init(self) -> None:
+        """创建或迁移 SQLite schema。"""
         with self._connect() as conn:
+            # Schema is intentionally kept in code so a fresh daemon can create
+            # its local state without a separate migration tool.
             conn.executescript(
                 """
                 create table if not exists conversations (
@@ -142,6 +152,8 @@ class Store:
                 );
                 """
             )
+            # Lightweight additive migrations keep older local databases usable
+            # while preserving user data.
             _ensure_column(
                 conn,
                 table="conversations",
@@ -174,6 +186,7 @@ class Store:
             )
 
     def ensure_conversation(self, conversation_id: str) -> Conversation:
+        """读取会话；不存在时创建一条默认会话记录。"""
         with self._lock, self._connect() as conn:
             row = conn.execute(
                 "select * from conversations where chat_id = ?", (conversation_id,)
@@ -193,6 +206,7 @@ class Store:
             return _conversation_from_row(row)
 
     def set_conversation_session(self, conversation_id: str, session_id: str) -> None:
+        """记录该 conversation 对应的 Codex session/thread id。"""
         with self._lock, self._connect() as conn:
             conn.execute(
                 """
@@ -212,6 +226,7 @@ class Store:
         model: str | None = None,
         reasoning_effort: str | None = None,
     ) -> Conversation:
+        """更新单个会话的 Agent provider/mode/model/reasoning 覆盖。"""
         self.ensure_conversation(conversation_id)
         current = self.ensure_conversation(conversation_id).agent_settings
         with self._lock, self._connect() as conn:
@@ -245,6 +260,7 @@ class Store:
         intent: str,
         metadata: dict[str, Any] | None = None,
     ) -> RunRecord:
+        """插入 queued run 记录并返回持久化对象。"""
         self.ensure_conversation(conversation_id)
         run_id = uuid.uuid4().hex
         now = utc_now()
@@ -277,6 +293,7 @@ class Store:
         stdout_path: Path,
         stderr_path: Path,
     ) -> None:
+        """把 run 标记为 running，并记录 prompt/stdout/stderr 路径。"""
         with self._lock, self._connect() as conn:
             conn.execute(
                 """
@@ -302,6 +319,7 @@ class Store:
         result_path: Path,
         session_id: str | None,
     ) -> None:
+        """把 run 标记为 succeeded，并保存响应、结果路径和 session id。"""
         run = self.get_run(run_id)
         if session_id:
             self.set_conversation_session(run.conversation_id, session_id)
@@ -325,6 +343,7 @@ class Store:
             )
 
     def mark_run_failed(self, run_id: str, error: str) -> None:
+        """把 run 标记为 failed，并保存错误信息。"""
         now = utc_now()
         with self._lock, self._connect() as conn:
             conn.execute(
@@ -337,7 +356,9 @@ class Store:
             )
 
     def update_run_metadata(self, run_id: str, metadata: dict[str, Any]) -> None:
+        """合并更新 run 的 metadata_json 字段。"""
         current = self.get_run_metadata(run_id)
+        # Metadata is a shallow JSON object; callers pass only the keys they own.
         current.update(metadata)
         with self._lock, self._connect() as conn:
             conn.execute(
@@ -350,6 +371,7 @@ class Store:
             )
 
     def get_run_metadata(self, run_id: str) -> dict[str, Any]:
+        """读取并解析 run metadata_json。"""
         with self._connect() as conn:
             row = conn.execute(
                 "select metadata_json from runs where run_id = ?",
@@ -371,6 +393,7 @@ class Store:
         target_id: str,
         external_message_id: str,
     ) -> None:
+        """记录或更新 run 到外部消息 ID 的映射。"""
         now = utc_now()
         with self._lock, self._connect() as conn:
             conn.execute(
@@ -394,6 +417,7 @@ class Store:
         channel: str,
         target_id: str,
     ) -> ChannelMessageRecord | None:
+        """读取 run 在某 channel/target 上发送过的外部消息。"""
         with self._connect() as conn:
             row = conn.execute(
                 """
@@ -447,6 +471,7 @@ class Store:
             return int(cursor.lastrowid)
 
     def runtime_changes(self, *, limit: int = 50) -> list[RuntimeChangeRecord]:
+        """按时间倒序读取最近的 runtime 配置审计记录。"""
         with self._connect() as conn:
             rows = conn.execute(
                 """
@@ -459,6 +484,7 @@ class Store:
         return [_runtime_change_from_row(row) for row in rows]
 
     def get_run(self, run_id: str) -> RunRecord:
+        """按 run_id 读取一条运行记录。"""
         with self._connect() as conn:
             row = conn.execute("select * from runs where run_id = ?", (run_id,)).fetchone()
         if row is None:
@@ -470,6 +496,7 @@ class Store:
         conversation_id: str | None = None,
         limit: int = 5,
     ) -> list[RunRecord]:
+        """读取最近运行记录，可按 conversation 过滤。"""
         sql = "select * from runs"
         params: tuple[Any, ...] = ()
         if conversation_id is not None:
@@ -482,6 +509,7 @@ class Store:
         return [_run_from_row(row) for row in rows]
 
     def counts_by_status(self) -> dict[str, int]:
+        """统计各 run 状态的数量。"""
         with self._connect() as conn:
             rows = conn.execute(
                 "select status, count(*) as count from runs group by status"
@@ -489,14 +517,18 @@ class Store:
         return {str(row["status"]): int(row["count"]) for row in rows}
 
     def active_conversation_count(self) -> int:
+        """统计 Store 中已有会话数。"""
         with self._connect() as conn:
             row = conn.execute("select count(*) as count from conversations").fetchone()
         return int(row["count"])
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
+        """打开 SQLite 连接并启用 WAL 和外键约束。"""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
+        # WAL improves concurrent read/write behavior for Feishu callbacks,
+        # LoopManager workers, and MCP requests sharing the same local DB.
         conn.execute("pragma journal_mode = wal")
         conn.execute("pragma foreign_keys = on")
         try:
@@ -507,6 +539,7 @@ class Store:
 
 
 def _conversation_from_row(row: sqlite3.Row) -> Conversation:
+    """把 SQLite row 转换为 Conversation。"""
     return Conversation(
         conversation_id=str(row["chat_id"]),
         agent_session_id=row["agent_session_id"],
@@ -522,6 +555,7 @@ def _conversation_from_row(row: sqlite3.Row) -> Conversation:
 
 
 def _run_from_row(row: sqlite3.Row) -> RunRecord:
+    """把 SQLite row 转换为 RunRecord。"""
     return RunRecord(
         run_id=str(row["run_id"]),
         conversation_id=str(row["chat_id"]),
@@ -537,6 +571,7 @@ def _run_from_row(row: sqlite3.Row) -> RunRecord:
 
 
 def _channel_message_from_row(row: sqlite3.Row) -> ChannelMessageRecord:
+    """把 SQLite row 转换为 ChannelMessageRecord。"""
     return ChannelMessageRecord(
         id=int(row["id"]),
         run_id=str(row["run_id"]),
@@ -549,6 +584,7 @@ def _channel_message_from_row(row: sqlite3.Row) -> ChannelMessageRecord:
 
 
 def _runtime_change_from_row(row: sqlite3.Row) -> RuntimeChangeRecord:
+    """把 SQLite row 转换为 RuntimeChangeRecord。"""
     return RuntimeChangeRecord(
         id=int(row["id"]),
         run_id=row["run_id"],
@@ -564,6 +600,7 @@ def _runtime_change_from_row(row: sqlite3.Row) -> RuntimeChangeRecord:
 
 
 def _optional_row_str(value: Any) -> str | None:
+    """把可空 SQLite 字段转换为可空字符串。"""
     if value is None:
         return None
     return str(value)
@@ -576,6 +613,7 @@ def _ensure_column(
     column: str,
     definition: str,
 ) -> None:
+    """按需追加旧数据库缺失的列，实现轻量迁移。"""
     rows = conn.execute(f"pragma table_info({table})").fetchall()
     existing = {str(row["name"]) for row in rows}
     if column in existing:

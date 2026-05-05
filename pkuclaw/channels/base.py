@@ -1,3 +1,4 @@
+"""定义 channel adapter、入站消息、出站后端和事件 sink 协议。"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -19,6 +20,7 @@ class ChannelTarget:
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def as_context(self) -> dict[str, Any]:
+        """转换为可序列化的 channel context 字典。"""
         context: dict[str, Any] = {
             "channel": self.channel,
             "target_type": self.target_type,
@@ -46,6 +48,7 @@ class ChannelInboundMessage:
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
     def channel_context(self) -> dict[str, Any]:
+        """转换为 CoreRuntime/Agent prompt 可使用的 channel 上下文字典。"""
         context: dict[str, Any] = {"channel": self.channel}
         if self.sender_id:
             context["sender_id"] = self.sender_id
@@ -64,6 +67,7 @@ ChannelEnvelope = ChannelInboundMessage
 
 @dataclass(frozen=True)
 class ChannelOutboundResult:
+    """channel outbox 操作的统一返回对象。"""
     ok: bool
     message: str
     target: ChannelTarget | None = None
