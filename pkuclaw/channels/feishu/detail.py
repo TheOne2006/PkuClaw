@@ -83,7 +83,7 @@ def build_run_detail_card(
 
 def agent_context(core_runtime: CoreRuntime, conversation_id: str) -> dict[str, str]:
     conversation = core_runtime.store.ensure_conversation(conversation_id)
-    runtime = core_runtime.runtime_config.read()
+    runtime = core_runtime.runtime_config.read_snapshot()
     settings = merge_agent_settings(runtime.agent, conversation.agent_settings)
     mode = settings.mode or "standard"
     return {

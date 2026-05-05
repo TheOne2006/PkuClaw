@@ -1,21 +1,33 @@
 from __future__ import annotations
 
+import ast
 import io
 import json
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from pkuclaw.agents import AgentWrapper
 from pkuclaw.code_agents.artifacts import codex_trace_events
-from pkuclaw.code_agents.subskills import render_subskills, resolve_subskill_names
+from pkuclaw.code_agents.subskills import (
+    load_skill_registry,
+    render_subskills,
+    resolve_subskill_names,
+)
+from pkuclaw.channels.base import (
+    ChannelInboundMessage,
+    ChannelOutboundResult,
+    ChannelTarget,
+)
 from pkuclaw.channels.feishu.cards import (
     FeishuCardKitClient,
     FeishuCardRenderer,
     FeishuRunCardSink,
 )
-from pkuclaw.channels.feishu.tools import FeishuChannelToolBackend
+from pkuclaw.channels.feishu.tools import FeishuChannelOutboundBackend
 from pkuclaw.channels.feishu.events import (
     card_action_operator_open_id,
     card_action_target,
@@ -32,11 +44,17 @@ from pkuclaw.config import (
 )
 from pkuclaw.core import logging as log
 from pkuclaw.core.app import CoreRuntime
-from pkuclaw.core.models import AgentEvent, ChannelMessage
+from pkuclaw.core.models import AgentEvent, AgentResult
 from pkuclaw.core.router import classify_message
 from pkuclaw.core.store import Store
 from pkuclaw.loop import LoopManager
-from pkuclaw.runtime_config import RuntimeConfigLoader
+from pkuclaw.mcp.handlers import DaemonMcpToolHandler
+from pkuclaw.mcp.server import handle_mcp_request
+from pkuclaw.runtime_config import RuntimeConfigStore
+from pkuclaw.runtime import (
+    build_core_runtime_services,
+    build_runtime_bootstrap,
+)
 
 
 class RouterTests(unittest.TestCase):
@@ -65,6 +83,103 @@ class SubSkillTests(unittest.TestCase):
         self.assertIn("tools/pku3b-setup.md", names)
         self.assertIn("tools/data-parser.md", names)
 
+    def test_runtime_registry_resolves_sync_dependencies(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            skills_dir = root / "sub-skills"
+            runtime_dir = root / "configs" / "runtime"
+            _write_test_subskills(skills_dir)
+            _write_skills_json(runtime_dir)
+
+            registry = load_skill_registry(
+                runtime_dir / "skills.json",
+                skills_dir=skills_dir,
+            )
+            names = resolve_subskill_names(
+                ("tasks/sync-notices.md",),
+                registry=registry,
+                skills_dir=skills_dir,
+                source="loop",
+            )
+
+        self.assertEqual(
+            names,
+            (
+                "runtime/codex-subagent.md",
+                "tasks/sync-notices.md",
+                "tools/pku3b-setup.md",
+                "tools/data-parser.md",
+            ),
+        )
+        self.assertFalse(registry.using_default)
+
+    def test_missing_skills_json_falls_back_to_default_registry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            skills_dir = Path(tmp) / "sub-skills"
+            _write_test_subskills(skills_dir)
+
+            registry = load_skill_registry(
+                Path(tmp) / "missing-skills.json",
+                skills_dir=skills_dir,
+            )
+            names = resolve_subskill_names(
+                ("tasks/sync-notices.md",),
+                registry=registry,
+                skills_dir=skills_dir,
+                source="loop",
+            )
+
+        self.assertTrue(registry.using_default)
+        self.assertTrue(registry.warnings)
+        self.assertIn("fallback", registry.warnings[0])
+        self.assertIn("tools/pku3b-setup.md", names)
+        self.assertIn("tools/data-parser.md", names)
+
+    def test_invalid_skills_json_falls_back_with_warning(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            skills_dir = root / "sub-skills"
+            registry_path = root / "skills.json"
+            _write_test_subskills(skills_dir)
+            registry_path.write_text("{not json", encoding="utf-8")
+
+            registry = load_skill_registry(registry_path, skills_dir=skills_dir)
+
+        self.assertTrue(registry.using_default)
+        self.assertTrue(registry.warnings)
+        self.assertIn("skill registry fallback", registry.warnings[0])
+
+    def test_escaping_skill_path_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            skills_dir = root / "sub-skills"
+            registry_path = root / "skills.json"
+            _write_test_subskills(skills_dir)
+            registry_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "skills": [
+                            {
+                                "name": "../escape.md",
+                                "intent": "sync",
+                                "dependencies": [],
+                                "allowed_sources": ["realtime"],
+                                "requires_confirmation": False,
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            registry = load_skill_registry(registry_path, skills_dir=skills_dir)
+            with self.assertRaisesRegex(RuntimeError, "escapes skill root"):
+                resolve_subskill_names(("../escape.md",), skills_dir=skills_dir)
+
+        self.assertTrue(registry.using_default)
+        self.assertIn("escapes skill root", registry.warnings[0])
+
     def test_renders_subskills_from_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "sub-skills"
@@ -75,10 +190,34 @@ class SubSkillTests(unittest.TestCase):
                 skills_dir=root,
             )
 
-        self.assertIn("## runtime/codex-subagent.md", rendered)
-        self.assertIn("## tasks/do-homework.md", rendered)
-        self.assertIn("## tools/pdf-reader.md", rendered)
-        self.assertIn("## tools/pku3b-setup.md", rendered)
+            self.assertIn("## runtime/codex-subagent.md", rendered)
+            self.assertIn("## tasks/do-homework.md", rendered)
+            self.assertIn("## tools/pdf-reader.md", rendered)
+            self.assertIn("## tools/pku3b-setup.md", rendered)
+
+
+class ChannelContractTests(unittest.TestCase):
+    def test_inbound_message_carries_target_context(self) -> None:
+        envelope = ChannelInboundMessage(
+            channel="feishu",
+            conversation_id="feishu:user:open-1",
+            sender_id="open-1",
+            target=_feishu_chat_target(),
+            text="你好",
+            external_message_id="om_inbound",
+        )
+
+        self.assertEqual(envelope.target.target_type, "chat_id")
+        self.assertEqual(envelope.channel_context()["channel"], "feishu")
+        self.assertEqual(
+            envelope.channel_context()["target"],
+            {
+                "channel": "feishu",
+                "target_type": "chat_id",
+                "target_id": "oc_chat",
+            },
+        )
+        self.assertEqual(envelope.channel_context()["external_message_id"], "om_inbound")
 
 
 class StoreAndCoreRuntimeTests(unittest.TestCase):
@@ -87,11 +226,12 @@ class StoreAndCoreRuntimeTests(unittest.TestCase):
             store = Store(Path(tmp) / "pkuclaw.db")
             loop = _core_runtime(Path(tmp), store)
 
-            dispatch = loop.ingest(
-                ChannelMessage(
+            dispatch = loop.ingest_channel_message(
+                ChannelInboundMessage(
                     channel="feishu",
                     conversation_id="feishu:user:open-1",
                     sender_id="open-1",
+                    target=_feishu_chat_target(),
                     text="",
                     event_key="mode:fast",
                 )
@@ -103,11 +243,12 @@ class StoreAndCoreRuntimeTests(unittest.TestCase):
             conversation = store.ensure_conversation("feishu:user:open-1")
             self.assertEqual(conversation.agent_settings.mode, "fast")
 
-            dispatch = loop.ingest(
-                ChannelMessage(
+            dispatch = loop.ingest_channel_message(
+                ChannelInboundMessage(
                     channel="feishu",
                     conversation_id="feishu:user:open-1",
                     sender_id="open-1",
+                    target=_feishu_chat_target(),
                     text="",
                     event_key="reasoning:high",
                 )
@@ -122,11 +263,12 @@ class StoreAndCoreRuntimeTests(unittest.TestCase):
             store = Store(Path(tmp) / "pkuclaw.db")
             loop = _core_runtime(Path(tmp), store)
 
-            dispatch = loop.ingest(
-                ChannelMessage(
+            dispatch = loop.ingest_channel_message(
+                ChannelInboundMessage(
                     channel="feishu",
                     conversation_id="feishu:user:open-1",
                     sender_id="open-1",
+                    target=_feishu_chat_target(),
                     text="你好",
                 )
             )
@@ -134,6 +276,11 @@ class StoreAndCoreRuntimeTests(unittest.TestCase):
             self.assertFalse(dispatch.handled_locally)
             self.assertIsNotNone(dispatch.run_id)
             self.assertIsNotNone(dispatch.agent_request)
+            self.assertEqual(dispatch.channel_target, _feishu_chat_target())
+            self.assertEqual(
+                dispatch.agent_request.channel_context["target"]["target_id"],
+                "oc_chat",
+            )
             self.assertEqual(store.counts_by_status(), {"queued": 1})
 
     def test_unknown_event_key_does_not_create_run(self) -> None:
@@ -141,11 +288,12 @@ class StoreAndCoreRuntimeTests(unittest.TestCase):
             store = Store(Path(tmp) / "pkuclaw.db")
             loop = _core_runtime(Path(tmp), store)
 
-            dispatch = loop.ingest(
-                ChannelMessage(
+            dispatch = loop.ingest_channel_message(
+                ChannelInboundMessage(
                     channel="feishu",
                     conversation_id="feishu:user:open-1",
                     sender_id="open-1",
+                    target=_feishu_chat_target(),
                     text="",
                     event_key="unknown:action",
                 )
@@ -312,7 +460,7 @@ class FeishuCardTests(unittest.TestCase):
                 client=_fake_feishu_cardkit_client(fake_api),
                 renderer=FeishuCardRenderer(),
                 store=store,
-                chat_id="oc_chat",
+                target=_feishu_chat_target(),
                 run_id=run.run_id,
             )
 
@@ -383,6 +531,60 @@ class FeishuCardActionTests(unittest.TestCase):
 
 
 class AgentWrapperAndCodexTests(unittest.TestCase):
+    def test_wrapper_uses_runtime_skill_registry_dependencies(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime_dir = root / "runtime"
+            _write_runtime_json(runtime_dir)
+            _write_skills_json(
+                runtime_dir,
+                skills=[
+                    {
+                        "name": "tasks/sync-notices.md",
+                        "intent": "sync",
+                        "dependencies": ["tools/data-parser.md"],
+                        "allowed_sources": ["realtime", "loop"],
+                        "requires_confirmation": False,
+                    },
+                    {
+                        "name": "tools/data-parser.md",
+                        "intent": "tool",
+                        "dependencies": [],
+                        "allowed_sources": ["realtime", "loop"],
+                        "requires_confirmation": False,
+                    },
+                ],
+            )
+            _write_test_subskills(root / "sub-skills")
+            settings = _settings(root)
+            store = Store(settings.app.data_dir / "pkuclaw.db")
+            wrapper = AgentWrapper(
+                settings=settings,
+                store=store,
+                runtime_config=RuntimeConfigStore(runtime_dir),
+                repo_root=root,
+            )
+            plan = classify_message("同步一下课程通知")
+            request = _agent_request(
+                conversation_id="feishu:user:open-1",
+                text="同步一下课程通知",
+                intent=plan.intent,
+                skill_names=plan.skill_names,
+            )
+            prepared = wrapper.prepare(request, plan)
+
+            context = wrapper._build_context(  # noqa: SLF001 - verify run compiler input
+                run=store.get_run(prepared.run_id),
+                request=prepared.request,
+                plan=prepared.plan,
+            )
+
+        self.assertIn("## runtime/codex-subagent.md", context.rendered_skills)
+        self.assertIn("## tasks/sync-notices.md", context.rendered_skills)
+        self.assertIn("## tools/data-parser.md", context.rendered_skills)
+        self.assertNotIn("## tools/pku3b-setup.md", context.rendered_skills)
+        self.assertEqual(context.warnings, ())
+
     def test_wrapper_builds_prompt_and_codex_persists_result(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -410,7 +612,7 @@ class AgentWrapperAndCodexTests(unittest.TestCase):
             wrapper = AgentWrapper(
                 settings=settings,
                 store=store,
-                runtime_config=RuntimeConfigLoader(runtime_dir),
+                runtime_config=RuntimeConfigStore(runtime_dir),
                 repo_root=root,
             )
             request = _agent_request(
@@ -433,7 +635,7 @@ class AgentWrapperAndCodexTests(unittest.TestCase):
                 self.assertIn("gpt-test", command)
                 self.assertIn("read-only", command)
                 self.assertIn(
-                    'mcp_servers.pkuclaw_channel_tools.url="http://127.0.0.1:8765/mcp"',
+                    'mcp_servers.pkuclaw_daemon.url="http://127.0.0.1:8765/mcp"',
                     command,
                 )
                 return FakePopen(
@@ -486,14 +688,202 @@ class RuntimeConfigTests(unittest.TestCase):
     def test_runtime_json_fallback_is_visible(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             runtime_dir = Path(tmp)
-            loader = RuntimeConfigLoader(runtime_dir)
+            loader = RuntimeConfigStore(runtime_dir)
 
-            config = loader.read()
+            config = loader.read_snapshot()
 
             self.assertEqual(config.agent.provider, "codex")
             self.assertEqual(config.loops[0].id, "sync_notices")
             self.assertTrue(config.warnings)
             self.assertIn("fallback", config.warnings[0])
+
+    def test_invalid_runtime_file_falls_back_to_last_valid(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp)
+            _write_runtime_json(
+                runtime_dir,
+                loops=[
+                    {
+                        "id": "valid_loop",
+                        "enabled": True,
+                        "interval_seconds": 60,
+                        "prompt": "valid prompt",
+                        "skill_names": ["tasks/sync-notices.md"],
+                        "sink_mode": "silent",
+                    }
+                ],
+            )
+            runtime_store = RuntimeConfigStore(runtime_dir)
+            self.assertEqual(runtime_store.read_snapshot().loops[0].id, "valid_loop")
+
+            (runtime_dir / "runtime.json").write_text("{not json", encoding="utf-8")
+
+            fallback = runtime_store.read_snapshot()
+
+            self.assertEqual(fallback.loops[0].id, "valid_loop")
+            self.assertTrue(fallback.warnings)
+            self.assertIn("fallback", fallback.warnings[-1])
+
+    def test_runtime_loop_accepts_default_target_and_overlap_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_dir = Path(tmp)
+            _write_runtime_json(
+                runtime_dir,
+                loops=[
+                    {
+                        "id": "targeted_loop",
+                        "enabled": True,
+                        "interval_seconds": 60,
+                        "prompt": "targeted prompt",
+                        "skill_names": [],
+                        "sink_mode": "silent",
+                        "notify_policy": "important_only",
+                        "default_channel": "feishu",
+                        "default_target_type": "chat_id",
+                        "default_target_id": "oc_target",
+                        "prevent_overlap": True,
+                    }
+                ],
+            )
+
+            loop = RuntimeConfigStore(runtime_dir).read_snapshot().loops[0]
+
+            self.assertEqual(loop.default_channel, "feishu")
+            self.assertEqual(loop.default_target_type, "chat_id")
+            self.assertEqual(loop.default_target_id, "oc_target")
+            self.assertTrue(loop.prevent_overlap)
+
+    def test_add_loop_writes_runtime_json(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_runtime_json(root / "runtime")
+            store = Store(root / "pkuclaw.db")
+            core_runtime = _core_runtime(root, store)
+
+            result = core_runtime.add_loop(
+                loop={
+                    "id": "weekly_review",
+                    "enabled": True,
+                    "interval_seconds": 3600,
+                    "prompt": "review weekly tasks",
+                    "skill_names": ["tasks/sync-notices.md"],
+                    "sink_mode": "silent",
+                    "notify_policy": "important_only",
+                },
+                actor="test",
+            )
+
+            data = json.loads((root / "runtime" / "runtime.json").read_text(encoding="utf-8"))
+            self.assertEqual(result["action"], "runtime_add_loop")
+            self.assertEqual(result["status"], "written")
+            self.assertIn("audit", result)
+            self.assertIn("weekly_review", [loop["id"] for loop in data["loops"]])
+
+    def test_add_loop_creates_backup(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_runtime_json(root / "runtime")
+            store = Store(root / "pkuclaw.db")
+            core_runtime = _core_runtime(root, store)
+
+            result = core_runtime.add_loop(
+                loop={
+                    "id": "backup_check",
+                    "enabled": True,
+                    "interval_seconds": 300,
+                    "prompt": "backup check",
+                    "skill_names": [],
+                    "sink_mode": "silent",
+                },
+                actor="test",
+            )
+
+            backup_path = Path(result["backup_path"])
+            self.assertTrue(backup_path.exists())
+            self.assertEqual(backup_path.parent, root / "runtime" / "backups")
+            self.assertTrue(list((root / "runtime" / "backups").glob("runtime.*.json")))
+
+    def test_duplicate_loop_id_validation_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_runtime_json(root / "runtime")
+            store = Store(root / "pkuclaw.db")
+            core_runtime = _core_runtime(root, store)
+
+            with self.assertRaisesRegex(RuntimeError, "duplicate runtime loop id"):
+                core_runtime.add_loop(
+                    loop={
+                        "id": "sync_notices",
+                        "enabled": True,
+                        "interval_seconds": 30,
+                        "prompt": "duplicate",
+                        "skill_names": [],
+                        "sink_mode": "silent",
+                    },
+                    actor="test",
+                )
+
+            data = json.loads((root / "runtime" / "runtime.json").read_text(encoding="utf-8"))
+            self.assertEqual([loop["id"] for loop in data["loops"]], ["sync_notices"])
+            self.assertEqual(store.runtime_changes(), [])
+
+    def test_invalid_loop_update_validates_before_backup_write_and_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime_path = root / "runtime" / "runtime.json"
+            _write_runtime_json(root / "runtime")
+            original_text = runtime_path.read_text(encoding="utf-8")
+            store = Store(root / "pkuclaw.db")
+            core_runtime = _core_runtime(root, store)
+
+            with self.assertRaisesRegex(RuntimeError, "interval_seconds must be >= 1"):
+                core_runtime.update_loop(
+                    loop_id="sync_notices",
+                    updates={"interval_seconds": 0},
+                    actor="test",
+                )
+
+            self.assertEqual(runtime_path.read_text(encoding="utf-8"), original_text)
+            self.assertFalse((root / "runtime" / "backups").exists())
+            self.assertEqual(store.runtime_changes(), [])
+
+    def test_disable_loop_then_list_loops_shows_disabled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_runtime_json(root / "runtime")
+            store = Store(root / "pkuclaw.db")
+            core_runtime = _core_runtime(root, store)
+
+            core_runtime.disable_loop(loop_id="sync_notices", actor="test")
+
+            loops = {loop["id"]: loop for loop in core_runtime.runtime_list_loops()}
+            self.assertFalse(loops["sync_notices"]["enabled"])
+
+    def test_runtime_changes_audit_records_write(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_runtime_json(root / "runtime")
+            store = Store(root / "pkuclaw.db")
+            core_runtime = _core_runtime(root, store)
+
+            core_runtime.add_loop(
+                loop={
+                    "id": "audit_check",
+                    "enabled": True,
+                    "interval_seconds": 600,
+                    "prompt": "audit check",
+                    "skill_names": [],
+                    "sink_mode": "silent",
+                },
+                actor="test-agent",
+            )
+
+            changes = store.runtime_changes()
+            self.assertEqual(len(changes), 1)
+            self.assertEqual(changes[0].actor, "test-agent")
+            self.assertEqual(changes[0].action, "runtime_add_loop")
+            self.assertEqual(changes[0].status, "written")
+            self.assertIn("audit_check", changes[0].diff_summary)
 
     def test_loop_tick_uses_silent_sink(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -532,29 +922,627 @@ class RuntimeConfigTests(unittest.TestCase):
                 patch("pkuclaw.code_agents.codex.subprocess.Popen", side_effect=fake_popen),
                 patch.object(log.console, "print"),
             ):
-                run_id = LoopManager(settings=settings, core_runtime=loop).tick(reason="manual")
+                manager = LoopManager(settings=settings, core_runtime=loop)
+                try:
+                    run_id = manager.tick(reason="manual")
+                finally:
+                    manager.shutdown(wait=True)
 
             run = store.get_run(run_id)
             self.assertEqual(run.intent, "loop")
             self.assertEqual(run.status, "succeeded")
 
+    def test_disabled_loop_is_not_scheduled(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_runtime_json(
+                root / "runtime",
+                loops=[
+                    {
+                        "id": "disabled_loop",
+                        "enabled": False,
+                        "interval_seconds": 1,
+                        "prompt": "disabled",
+                        "skill_names": [],
+                        "sink_mode": "silent",
+                    }
+                ],
+            )
+            settings = _settings(root)
+            store = Store(root / "pkuclaw.db")
+            core_runtime = _core_runtime(root, store)
+            manager = LoopManager(settings=settings, core_runtime=core_runtime)
+            try:
+                scheduled = manager.run_due_once(now=1.0)
+            finally:
+                manager.shutdown(wait=True)
 
-class ChannelToolTests(unittest.TestCase):
-    def test_feishu_channel_tools_send_text_and_report_image_gap(self) -> None:
+            self.assertEqual(scheduled, ())
+            self.assertEqual(store.counts_by_status(), {})
+
+    def test_manual_tick_runs_requested_loop_id(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_runtime_json(
+                root / "runtime",
+                loops=[
+                    {
+                        "id": "loop_a",
+                        "enabled": True,
+                        "interval_seconds": 30,
+                        "prompt": "prompt a",
+                        "skill_names": [],
+                        "sink_mode": "silent",
+                    },
+                    {
+                        "id": "loop_b",
+                        "enabled": True,
+                        "interval_seconds": 30,
+                        "prompt": "prompt b",
+                        "skill_names": [],
+                        "sink_mode": "silent",
+                    },
+                ],
+            )
+            settings = _settings(root)
+            store = Store(root / "pkuclaw.db")
+            core_runtime = _core_runtime(root, store)
+            manager = LoopManager(settings=settings, core_runtime=core_runtime)
+            seen_loop_ids: list[str] = []
+
+            def fake_run_agent(run_id, plan, request, sink):
+                seen_loop_ids.append(request.channel_context["loop_id"])
+                return AgentResult(
+                    run_id=run_id,
+                    status="succeeded",
+                    response_text="ok",
+                    session_id=None,
+                    result_path=root / "result.md",
+                )
+
+            try:
+                with patch.object(core_runtime, "run_agent", side_effect=fake_run_agent):
+                    run_id = manager.tick(loop_id="loop_b")
+            finally:
+                manager.shutdown(wait=True)
+
+            self.assertEqual(seen_loop_ids, ["loop_b"])
+            metadata = store.get_run_metadata(run_id)
+            self.assertEqual(metadata["loop_id"], "loop_b")
+            self.assertEqual(store.get_run(run_id).user_text, "prompt b")
+
+    def test_unknown_loop_id_raises(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_runtime_json(root / "runtime")
+            settings = _settings(root)
+            store = Store(root / "pkuclaw.db")
+            core_runtime = _core_runtime(root, store)
+            manager = LoopManager(settings=settings, core_runtime=core_runtime)
+            try:
+                with self.assertRaisesRegex(RuntimeError, "runtime loop not found"):
+                    manager.tick(loop_id="missing_loop")
+            finally:
+                manager.shutdown(wait=True)
+
+    def test_loop_run_metadata_includes_loop_context_and_target(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_runtime_json(
+                root / "runtime",
+                loops=[
+                    {
+                        "id": "targeted_loop",
+                        "enabled": True,
+                        "interval_seconds": 60,
+                        "prompt": "targeted prompt",
+                        "skill_names": [],
+                        "sink_mode": "silent",
+                        "notify_policy": "important_only",
+                        "default_channel": "feishu",
+                        "default_target_type": "chat_id",
+                        "default_target_id": "oc_target",
+                    }
+                ],
+            )
+            store = Store(root / "pkuclaw.db")
+            core_runtime = _core_runtime(root, store)
+
+            dispatch = core_runtime.create_loop_run(
+                loop_id="targeted_loop",
+                scheduled_at="2026-05-05T00:00:00+00:00",
+            )
+
+            self.assertIsNotNone(dispatch.run_id)
+            self.assertIsNotNone(dispatch.agent_request)
+            metadata = store.get_run_metadata(str(dispatch.run_id))
+            self.assertEqual(metadata["source"], "loop")
+            self.assertEqual(metadata["loop_id"], "targeted_loop")
+            self.assertEqual(metadata["notify_policy"], "important_only")
+            self.assertEqual(metadata["sink_mode"], "silent")
+            self.assertEqual(metadata["scheduled_at"], "2026-05-05T00:00:00+00:00")
+            self.assertEqual(metadata["target"]["target_id"], "oc_target")
+            self.assertEqual(dispatch.agent_request.channel, "feishu")
+            self.assertEqual(
+                dispatch.agent_request.channel_context["target"]["target_type"],
+                "chat_id",
+            )
+
+    def test_prevent_overlap_skips_duplicate_loop_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_runtime_json(
+                root / "runtime",
+                loops=[
+                    {
+                        "id": "slow_loop",
+                        "enabled": True,
+                        "interval_seconds": 1,
+                        "prompt": "slow",
+                        "skill_names": [],
+                        "sink_mode": "silent",
+                        "prevent_overlap": True,
+                    }
+                ],
+            )
+            settings = _settings(root)
+            store = Store(root / "pkuclaw.db")
+            core_runtime = _core_runtime(root, store)
+            manager = LoopManager(settings=settings, core_runtime=core_runtime)
+            started = threading.Event()
+            release = threading.Event()
+
+            def fake_run_agent(run_id, plan, request, sink):
+                started.set()
+                release.wait(timeout=2)
+                return AgentResult(
+                    run_id=run_id,
+                    status="succeeded",
+                    response_text="ok",
+                    session_id=None,
+                    result_path=root / "result.md",
+                )
+
+            try:
+                with patch.object(core_runtime, "run_agent", side_effect=fake_run_agent):
+                    first_run_id = manager.tick(loop_id="slow_loop", wait=False)
+                    self.assertTrue(started.wait(timeout=1))
+                    with self.assertRaisesRegex(RuntimeError, "already running"):
+                        manager.tick(loop_id="slow_loop", wait=False)
+                    release.set()
+                    _wait_for_loop_manager_idle(manager)
+            finally:
+                release.set()
+                manager.shutdown(wait=True)
+
+            self.assertIsNotNone(first_run_id)
+            self.assertEqual(store.counts_by_status(), {"queued": 1})
+
+    def test_multi_loop_scheduler_does_not_block_on_long_loop(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_runtime_json(
+                root / "runtime",
+                loops=[
+                    {
+                        "id": "slow_loop",
+                        "enabled": True,
+                        "interval_seconds": 60,
+                        "prompt": "slow",
+                        "skill_names": [],
+                        "sink_mode": "silent",
+                    },
+                    {
+                        "id": "fast_loop",
+                        "enabled": True,
+                        "interval_seconds": 60,
+                        "prompt": "fast",
+                        "skill_names": [],
+                        "sink_mode": "silent",
+                    },
+                ],
+            )
+            settings = _settings(root)
+            store = Store(root / "pkuclaw.db")
+            core_runtime = _core_runtime(root, store)
+            manager = LoopManager(settings=settings, core_runtime=core_runtime)
+            slow_started = threading.Event()
+            fast_started = threading.Event()
+            release_slow = threading.Event()
+
+            def fake_run_agent(run_id, plan, request, sink):
+                loop_id = request.channel_context["loop_id"]
+                if loop_id == "slow_loop":
+                    slow_started.set()
+                    release_slow.wait(timeout=2)
+                if loop_id == "fast_loop":
+                    fast_started.set()
+                return AgentResult(
+                    run_id=run_id,
+                    status="succeeded",
+                    response_text=f"{loop_id} ok",
+                    session_id=None,
+                    result_path=root / f"{loop_id}.md",
+                )
+
+            try:
+                with patch.object(core_runtime, "run_agent", side_effect=fake_run_agent):
+                    scheduled = manager.run_due_once(now=10.0)
+                    self.assertEqual(len(scheduled), 2)
+                    self.assertTrue(slow_started.wait(timeout=1))
+                    self.assertTrue(fast_started.wait(timeout=1))
+                    release_slow.set()
+                    _wait_for_loop_manager_idle(manager)
+            finally:
+                release_slow.set()
+                manager.shutdown(wait=True)
+
+    def test_loop_interval_seconds_controls_independent_next_due(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_runtime_json(
+                root / "runtime",
+                loops=[
+                    {
+                        "id": "fast_loop",
+                        "enabled": True,
+                        "interval_seconds": 30,
+                        "prompt": "fast",
+                        "skill_names": [],
+                        "sink_mode": "silent",
+                    },
+                    {
+                        "id": "slow_loop",
+                        "enabled": True,
+                        "interval_seconds": 60,
+                        "prompt": "slow",
+                        "skill_names": [],
+                        "sink_mode": "silent",
+                    },
+                ],
+            )
+            settings = _settings(root)
+            store = Store(root / "pkuclaw.db")
+            core_runtime = _core_runtime(root, store)
+            manager = LoopManager(settings=settings, core_runtime=core_runtime)
+
+            def fake_run_agent(run_id, plan, request, sink):
+                return AgentResult(
+                    run_id=run_id,
+                    status="succeeded",
+                    response_text="ok",
+                    session_id=None,
+                    result_path=root / "result.md",
+                )
+
+            try:
+                with patch.object(core_runtime, "run_agent", side_effect=fake_run_agent):
+                    self.assertEqual(len(manager.run_due_once(now=100.0)), 2)
+                    _wait_for_loop_manager_idle(manager)
+                    self.assertEqual(manager.next_due_by_loop["fast_loop"], 130.0)
+                    self.assertEqual(manager.next_due_by_loop["slow_loop"], 160.0)
+                    self.assertEqual(manager.run_due_once(now=129.0), ())
+                    self.assertEqual(len(manager.run_due_once(now=130.0)), 1)
+                    _wait_for_loop_manager_idle(manager)
+            finally:
+                manager.shutdown(wait=True)
+
+
+class RuntimeBootstrapTests(unittest.TestCase):
+    def test_core_runtime_services_own_bootstrap_dependencies(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            settings = _settings(root)
+
+            services = build_core_runtime_services(settings, repo_root=root)
+            try:
+                self.assertIs(services.core_runtime.store, services.store)
+                self.assertIs(
+                    services.core_runtime.runtime_config,
+                    services.runtime_config,
+                )
+                self.assertIs(
+                    services.core_runtime.agent_wrapper,
+                    services.agent_wrapper,
+                )
+                self.assertIs(services.core_runtime.run_executor, services.run_executor)
+                self.assertEqual(dict(services.core_runtime.channel_backends), {})
+            finally:
+                services.run_executor.shutdown(cancel_futures=True)
+                services.callback_executor.shutdown(cancel_futures=True)
+
+    def test_mcp_handler_channel_send_text_uses_core_runtime_registry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            settings = _settings(root)
+            services = build_core_runtime_services(settings, repo_root=root)
+            backend = RecordingOutboundBackend(channel="feishu")
+            services.core_runtime.register_channel_backend(backend)
+            handler = DaemonMcpToolHandler(
+                core_runtime=services.core_runtime,
+                default_channel="feishu",
+            )
+
+            try:
+                result = handler.call_tool(
+                    "channel_send_text",
+                    {"target_id": "oc_chat", "text": "hello via core"},
+                )
+
+                self.assertTrue(result.ok)
+                self.assertEqual(result.data["message_id"], "om_recorded")
+                self.assertEqual(
+                    backend.calls,
+                    [("send_text", "feishu", "chat_id", "oc_chat", "hello via core")],
+                )
+                self.assertIn("feishu", services.core_runtime.channel_backends)
+            finally:
+                services.run_executor.shutdown(cancel_futures=True)
+                services.callback_executor.shutdown(cancel_futures=True)
+
+    def test_mcp_tools_list_includes_channel_and_runtime_tools(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store(Path(tmp) / "pkuclaw.db")
+            core_runtime = _core_runtime(Path(tmp), store)
+            handler = DaemonMcpToolHandler(core_runtime=core_runtime)
+
+            status, response = handle_mcp_request(
+                handler,
+                {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+            )
+
+            self.assertEqual(status, 200)
+            names = {tool["name"] for tool in response["result"]["tools"]}
+            self.assertIn("channel_send_text", names)
+            self.assertIn("channel_send_card", names)
+            self.assertIn("channel_send_image", names)
+            self.assertIn("channel_update_card", names)
+            self.assertIn("runtime_get_status", names)
+            self.assertIn("runtime_get_config", names)
+            self.assertIn("runtime_list_loops", names)
+            self.assertIn("runtime_list_recent_runs", names)
+            self.assertIn("runtime_get_run", names)
+            self.assertIn("runtime_add_loop", names)
+            self.assertTrue(all("pku3b" not in name for name in names))
+
+    def test_mcp_runtime_get_status_returns_status(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store(Path(tmp) / "pkuclaw.db")
+            core_runtime = _core_runtime(Path(tmp), store)
+            handler = DaemonMcpToolHandler(core_runtime=core_runtime)
+
+            status, response = handle_mcp_request(
+                handler,
+                {
+                    "jsonrpc": "2.0",
+                    "id": 2,
+                    "method": "tools/call",
+                    "params": {
+                        "name": "runtime_get_status",
+                        "arguments": {},
+                    },
+                },
+            )
+
+            self.assertEqual(status, 200)
+            self.assertFalse(response["result"]["isError"])
+            payload = json.loads(response["result"]["content"][0]["text"])
+            self.assertTrue(payload["ok"])
+            self.assertIn("runtime_config_path", payload["data"])
+            self.assertIn("run_counts", payload["data"])
+
+    def test_mcp_unknown_tool_returns_error(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = Store(Path(tmp) / "pkuclaw.db")
+            core_runtime = _core_runtime(Path(tmp), store)
+            handler = DaemonMcpToolHandler(core_runtime=core_runtime)
+
+            status, response = handle_mcp_request(
+                handler,
+                {
+                    "jsonrpc": "2.0",
+                    "id": 3,
+                    "method": "tools/call",
+                    "params": {"name": "does_not_exist", "arguments": {}},
+                },
+            )
+
+            self.assertEqual(status, 200)
+            self.assertIn("error", response)
+            self.assertIn("unknown tool", response["error"]["message"])
+
+    def test_mcp_runtime_write_tool_calls_core_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            _write_runtime_json(root / "runtime")
+            store = Store(root / "pkuclaw.db")
+            core_runtime = _core_runtime(root, store)
+            handler = DaemonMcpToolHandler(core_runtime=core_runtime)
+
+            result = handler.call_tool("runtime_disable_loop", {"loop_id": "sync_notices"})
+
+            self.assertTrue(result.ok)
+            self.assertEqual(result.data["action"], "runtime_disable_loop")
+            self.assertEqual(result.data["audit"]["status"], "recorded")
+            loops = {loop["id"]: loop for loop in core_runtime.runtime_list_loops()}
+            self.assertFalse(loops["sync_notices"]["enabled"])
+            self.assertEqual(store.runtime_changes()[0].action, "runtime_disable_loop")
+
+    def test_mcp_layer_has_no_direct_feishu_backend_imports(self) -> None:
+        forbidden_modules = {
+            "pkuclaw.channels.feishu",
+            "pkuclaw.channels.feishu.tools",
+            "pkuclaw.channels.feishu.gateway",
+            "pkuclaw.channels.feishu.handlers",
+        }
+        forbidden_names = {
+            "FeishuChannelOutboundBackend",
+            "FeishuRealtimeGateway",
+            "FeishuEventHandlers",
+            "FeishuCardKitClient",
+        }
+        for source_path in Path("pkuclaw/mcp").glob("*.py"):
+            tree = ast.parse(source_path.read_text(encoding="utf-8"))
+            imported_modules: set[str] = set()
+            imported_names: set[str] = set()
+            for node in ast.walk(tree):
+                if isinstance(node, ast.ImportFrom) and node.module:
+                    imported_modules.add(node.module)
+                    imported_names.update(alias.name for alias in node.names)
+                elif isinstance(node, ast.Import):
+                    imported_names.update(alias.name for alias in node.names)
+
+            self.assertTrue(imported_modules.isdisjoint(forbidden_modules), source_path)
+            self.assertTrue(imported_names.isdisjoint(forbidden_names), source_path)
+
+    def test_agent_wrapper_has_no_runtime_write_or_daemon_control_calls(self) -> None:
+        source_path = Path("pkuclaw/agents/wrapper.py")
+        tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        forbidden_modules = {
+            "pkuclaw.loop",
+            "pkuclaw.mcp.server",
+            "pkuclaw.channels.feishu.gateway",
+            "pkuclaw.channels.feishu.handlers",
+        }
+        forbidden_names = {"LoopManager", "DaemonMcpServer", "FeishuEventHandlers"}
+        forbidden_call_names = {
+            "write_runtime_patch",
+            "add_loop",
+            "update_loop",
+            "enable_loop",
+            "disable_loop",
+            "backup_current",
+            "atomic_write_json",
+            "attach_loop_manager",
+            "serve_forever",
+        }
+        imported_modules: set[str] = set()
+        imported_names: set[str] = set()
+        call_names: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                imported_modules.add(node.module)
+                imported_names.update(alias.name for alias in node.names)
+            elif isinstance(node, ast.Import):
+                imported_names.update(alias.name for alias in node.names)
+            elif isinstance(node, ast.Call):
+                func = node.func
+                if isinstance(func, ast.Attribute):
+                    call_names.add(func.attr)
+                elif isinstance(func, ast.Name):
+                    call_names.add(func.id)
+
+        self.assertTrue(imported_modules.isdisjoint(forbidden_modules))
+        self.assertTrue(imported_names.isdisjoint(forbidden_names))
+        self.assertTrue(call_names.isdisjoint(forbidden_call_names))
+
+    def test_loop_manager_does_not_import_or_call_agent_wrapper(self) -> None:
+        source_path = Path("pkuclaw/loop.py")
+        tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        imported_modules: set[str] = set()
+        names: set[str] = set()
+        attributes: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                imported_modules.add(node.module)
+                names.update(alias.name for alias in node.names)
+            elif isinstance(node, ast.Import):
+                names.update(alias.name for alias in node.names)
+            elif isinstance(node, ast.Name):
+                names.add(node.id)
+            elif isinstance(node, ast.Attribute):
+                attributes.add(node.attr)
+
+        self.assertNotIn("pkuclaw.agents.wrapper", imported_modules)
+        self.assertNotIn("AgentWrapper", names)
+        self.assertNotIn("agent_wrapper", attributes)
+
+    def test_feishu_gateway_stays_transport_only(self) -> None:
+        source_path = Path("pkuclaw/channels/feishu/gateway.py")
+        tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        forbidden_modules = {
+            "pkuclaw.agents",
+            "pkuclaw.agents.wrapper",
+            "pkuclaw.core.store",
+            "pkuclaw.loop",
+            "pkuclaw.mcp",
+            "pkuclaw.mcp.server",
+            "pkuclaw.runtime_config",
+        }
+        forbidden_names = {
+            "AgentWrapper",
+            "DaemonMcpServer",
+            "LoopManager",
+            "RuntimeConfigStore",
+            "Store",
+        }
+        imported_modules: set[str] = set()
+        imported_names: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module:
+                imported_modules.add(node.module)
+                imported_names.update(alias.name for alias in node.names)
+            elif isinstance(node, ast.Import):
+                imported_names.update(alias.name for alias in node.names)
+
+        self.assertTrue(imported_modules.isdisjoint(forbidden_modules))
+        self.assertTrue(imported_names.isdisjoint(forbidden_names))
+
+    def test_feishu_realtime_bootstrap_path_disables_mcp_and_loop_manager(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            settings = _settings(root)
+            backend = RecordingOutboundBackend(channel="feishu")
+            fake_gateway = FakeObject(
+                channel="feishu",
+                channel_backend=backend,
+                start=lambda: None,
+            )
+            with (
+                patch(
+                    "pkuclaw.runtime.bootstrap.build_feishu_realtime_gateway",
+                    return_value=fake_gateway,
+                ) as gateway_builder,
+                patch("pkuclaw.runtime.bootstrap._start_mcp_thread") as mcp_start,
+                patch("pkuclaw.runtime.bootstrap._start_loop_manager") as loop_start,
+            ):
+                bootstrap = build_runtime_bootstrap(
+                    settings,
+                    enable_loop=False,
+                    enable_mcp=False,
+                )
+
+            try:
+                gateway_builder.assert_called_once()
+                mcp_start.assert_not_called()
+                loop_start.assert_not_called()
+                self.assertIsNone(bootstrap.loop_manager)
+                self.assertIsNone(bootstrap.mcp_server)
+                self.assertEqual(bootstrap.threads, ())
+                self.assertIn("feishu", bootstrap.services.core_runtime.channel_backends)
+            finally:
+                bootstrap.services.run_executor.shutdown(cancel_futures=True)
+                bootstrap.services.callback_executor.shutdown(cancel_futures=True)
+
+
+class FeishuOutboxTests(unittest.TestCase):
+    def test_feishu_outbox_backend_sends_text_and_reports_image_gap(self) -> None:
         fake_api = FakeFeishuApi()
-        backend = FeishuChannelToolBackend(
+        backend = FeishuChannelOutboundBackend(
             client=_fake_feishu_cardkit_client(fake_api),
             renderer=FeishuCardRenderer(),
         )
 
-        result = backend.channel_send_text(target_id="oc_chat", text="hello")
-        image_result = backend.channel_send_image(
-            target_id="oc_chat",
+        result = backend.send_text(target=_feishu_chat_target(), text="hello")
+        image_result = backend.send_image(
+            target=_feishu_chat_target(),
             image_path="image.png",
         )
 
         self.assertTrue(result.ok)
         self.assertEqual(result.data["message_id"], "om_1")
+        self.assertEqual(result.target, _feishu_chat_target())
+        self.assertEqual(result.external_message_id, "om_1")
         self.assertFalse(image_result.ok)
         self.assertIn("not implemented", image_result.message)
 
@@ -573,6 +1561,81 @@ def _write_test_subskills(root: Path) -> None:
         path = root / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
+
+
+def _write_skills_json(
+    runtime_dir: Path,
+    *,
+    skills: list[dict] | None = None,
+) -> None:
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    data = {
+        "schema_version": 1,
+        "skills": skills
+        or [
+            {
+                "name": "runtime/codex-subagent.md",
+                "intent": "runtime",
+                "dependencies": [],
+                "allowed_sources": ["realtime", "loop", "mcp", "manual", "system"],
+                "requires_confirmation": False,
+            },
+            {
+                "name": "tasks/sync-notices.md",
+                "intent": "sync",
+                "dependencies": ["tools/pku3b-setup.md", "tools/data-parser.md"],
+                "allowed_sources": ["realtime", "loop"],
+                "requires_confirmation": False,
+            },
+            {
+                "name": "tasks/do-homework.md",
+                "intent": "homework",
+                "dependencies": ["tools/pdf-reader.md", "tools/pku3b-setup.md"],
+                "allowed_sources": ["realtime"],
+                "requires_confirmation": True,
+            },
+            {
+                "name": "tasks/write-notes.md",
+                "intent": "notes",
+                "dependencies": ["tools/pdf-reader.md"],
+                "allowed_sources": ["realtime", "loop"],
+                "requires_confirmation": False,
+            },
+            {
+                "name": "tools/pku3b-setup.md",
+                "intent": "tool",
+                "dependencies": [],
+                "allowed_sources": ["realtime", "loop", "mcp", "manual", "system"],
+                "requires_confirmation": False,
+            },
+            {
+                "name": "tools/data-parser.md",
+                "intent": "tool",
+                "dependencies": [],
+                "allowed_sources": ["realtime", "loop", "mcp", "manual", "system"],
+                "requires_confirmation": False,
+            },
+            {
+                "name": "tools/pdf-reader.md",
+                "intent": "tool",
+                "dependencies": [],
+                "allowed_sources": ["realtime", "loop", "mcp", "manual", "system"],
+                "requires_confirmation": False,
+            },
+        ],
+    }
+    (runtime_dir / "skills.json").write_text(
+        json.dumps(data, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def _feishu_chat_target() -> ChannelTarget:
+    return ChannelTarget(
+        channel="feishu",
+        target_type="chat_id",
+        target_id="oc_chat",
+    )
 
 
 def _element_tags(card: dict) -> set[str]:
@@ -635,6 +1698,53 @@ class CapturingSink:
 
     def emit(self, event: AgentEvent) -> None:
         self.events.append(event)
+
+
+class RecordingOutboundBackend:
+    def __init__(self, *, channel: str) -> None:
+        self.channel = channel
+        self.calls: list[tuple] = []
+
+    def send_text(self, *, target: ChannelTarget, text: str) -> ChannelOutboundResult:
+        self.calls.append(
+            ("send_text", target.channel, target.target_type, target.target_id, text)
+        )
+        return ChannelOutboundResult(
+            ok=True,
+            message="recorded text",
+            target=target,
+            external_message_id="om_recorded",
+            external_card_id="card_recorded",
+            data={"message_id": "om_recorded", "card_id": "card_recorded"},
+        )
+
+    def send_card(
+        self,
+        *,
+        target: ChannelTarget,
+        card: dict,
+    ) -> ChannelOutboundResult:
+        self.calls.append(("send_card", target.channel, target.target_id, card))
+        return ChannelOutboundResult(ok=True, message="recorded card", target=target)
+
+    def send_image(
+        self,
+        *,
+        target: ChannelTarget,
+        image_path: str,
+    ) -> ChannelOutboundResult:
+        self.calls.append(("send_image", target.channel, target.target_id, image_path))
+        return ChannelOutboundResult(ok=True, message="recorded image", target=target)
+
+    def update_card(
+        self,
+        *,
+        card_id: str,
+        card: dict,
+        sequence: int,
+    ) -> ChannelOutboundResult:
+        self.calls.append(("update_card", card_id, card, sequence))
+        return ChannelOutboundResult(ok=True, message="recorded update")
 
 
 class FakePopen:
@@ -839,9 +1949,60 @@ def _fake_feishu_cardkit_client(fake_api: FakeFeishuApi) -> FeishuCardKitClient:
     )
 
 
+def _write_runtime_json(
+    runtime_dir: Path,
+    *,
+    loops: list[dict] | None = None,
+    permissions: dict | None = None,
+) -> None:
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    data = {
+        "schema_version": 1,
+        "agent": {
+            "provider": "codex",
+            "mode": "standard",
+            "model": "",
+            "reasoning_effort": "",
+        },
+        "codex": {
+            "sandbox": "workspace-write",
+            "timeout_seconds": 1800,
+        },
+        "loops": loops
+        or [
+            {
+                "id": "sync_notices",
+                "enabled": True,
+                "interval_seconds": 900,
+                "prompt": "sync notices",
+                "skill_names": ["tasks/sync-notices.md"],
+                "sink_mode": "silent",
+                "notify_policy": "important_only",
+            }
+        ],
+        "prompt": {
+            "fragment_paths": [],
+            "default_skill_names": [],
+        },
+        "notifications": {
+            "policy": "important_only",
+        },
+        "permissions": permissions
+        or {
+            "agent_can_update_runtime": True,
+            "agent_can_add_loop": True,
+            "agent_can_modify_boot_config": False,
+        },
+    }
+    (runtime_dir / "runtime.json").write_text(
+        json.dumps(data, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
 def _core_runtime(root: Path, store: Store) -> CoreRuntime:
     settings = _settings(root)
-    runtime_config = RuntimeConfigLoader(root / "runtime")
+    runtime_config = RuntimeConfigStore(root / "runtime")
     return CoreRuntime(
         store=store,
         agent_wrapper=AgentWrapper(
@@ -907,6 +2068,15 @@ def _settings(root: Path) -> Settings:
         ),
         mcp=McpConfig(host="127.0.0.1", port=8765),
     )
+
+
+def _wait_for_loop_manager_idle(manager: LoopManager, *, timeout: float = 1.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not manager._active_by_loop:  # noqa: SLF001 - assert scheduler state in tests
+            return
+        time.sleep(0.01)
+    raise AssertionError("LoopManager did not become idle")
 
 
 if __name__ == "__main__":

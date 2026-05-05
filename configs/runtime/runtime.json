@@ -20,7 +20,8 @@
         "tasks/sync-notices.md"
       ],
       "sink_mode": "silent",
-      "notify_policy": "important_only"
+      "notify_policy": "important_only",
+      "prevent_overlap": true
     }
   ],
   "prompt": {

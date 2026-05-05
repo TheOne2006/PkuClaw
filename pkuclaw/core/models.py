@@ -4,15 +4,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
-
-@dataclass(frozen=True)
-class ChannelMessage:
-    channel: str
-    conversation_id: str
-    text: str
-    sender_id: str | None = None
-    event_key: str | None = None
-    raw: Any | None = None
+from pkuclaw.channels.base import ChannelTarget
 
 
 @dataclass(frozen=True)
@@ -21,6 +13,7 @@ class CoreDispatch:
     run_id: str | None = None
     plan: "TaskPlan | None" = None
     agent_request: "AgentRunRequest | None" = None
+    channel_target: ChannelTarget | None = None
     handled_locally: bool = False
 
 

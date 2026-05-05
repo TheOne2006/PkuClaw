@@ -306,7 +306,7 @@ class CodexAgent:
         command.extend(
             [
                 "-c",
-                f'mcp_servers.pkuclaw_channel_tools.url="{url}"',
+                f'mcp_servers.pkuclaw_daemon.url="{url}"',
             ]
         )
 

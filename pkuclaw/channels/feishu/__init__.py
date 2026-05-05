@@ -2,6 +2,6 @@
 
 from __future__ import annotations
 
-from .gateway import run_feishu_bot
+from .gateway import FeishuRealtimeGateway, build_feishu_realtime_gateway
 
-__all__ = ["run_feishu_bot"]
+__all__ = ["FeishuRealtimeGateway", "build_feishu_realtime_gateway"]

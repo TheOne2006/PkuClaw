@@ -37,7 +37,7 @@ class AgentRunContext:
     recent_runs_text: str
     rendered_skills: str
     prompt_fragments: str
-    channel_tools_text: str
+    mcp_tools_text: str
     warnings: tuple[str, ...]
 
 

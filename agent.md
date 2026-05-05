@@ -34,14 +34,25 @@ runtime. The central abstraction is `CoreRuntime`.
   channel outbox operations, and run lifecycle state.
 - Keep channel adapters thin. They should convert platform events to runtime
   messages and render runtime events back to the platform.
+- Feishu gateway must be transport-only: runtime bootstrap creates Store,
+  RuntimeConfigStore, AgentWrapper, LoopManager, and MCP server; gateway receives
+  an existing CoreRuntime and registers only channel transport/backend pieces.
 - Keep MCP protocol code thin. MCP tools expose capabilities; CoreRuntime owns
   the capabilities.
+- MCP must not call Feishu backend directly. Channel tools delegate to
+  CoreRuntime's channel outbox registry.
+- LoopManager schedules via CoreRuntime only; it must not import or call
+  AgentWrapper.
+- AgentWrapper may hot-read runtime snapshots for prompt/run compilation, but it
+  must not write runtime config, manage loops, start/stop daemons, or own channel
+  outbox operations.
 - Agents emit structured events through `AgentEventSink`; channels must not parse
   raw provider stdout directly.
 - Runtime settings are hot-read at run boundaries. Settings changed during a run
   apply to the next run unless a tool explicitly documents immediate behavior.
-- Runtime config is file-backed. Agent edits must be validated, backed up,
-  auditable, and safe to fall back from.
+- Runtime config is file-backed. Agent edits must go through CoreRuntime runtime
+  tools so they are validated, backed up, atomically written, audited, and safe
+  to fall back from.
 - Boot config is not live runtime config. Agents should not modify boot secrets,
   bind hosts, or credential settings unless a high-risk policy explicitly allows
   it and the user confirms.

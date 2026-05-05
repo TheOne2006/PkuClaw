@@ -51,6 +51,20 @@ class ChannelMessageRecord:
     updated_at: str
 
 
+@dataclass(frozen=True)
+class RuntimeChangeRecord:
+    id: int
+    run_id: str | None
+    actor: str
+    file: str
+    action: str
+    old_hash: str | None
+    new_hash: str | None
+    diff_summary: str
+    status: str
+    created_at: str
+
+
 class Store:
     def __init__(self, db_path: Path) -> None:
         self.db_path = db_path
@@ -113,6 +127,19 @@ class Store:
                     unique(run_id, channel, target_id),
                     foreign key (run_id) references runs(run_id)
                 );
+
+                create table if not exists runtime_changes (
+                    id integer primary key autoincrement,
+                    run_id text,
+                    actor text not null,
+                    file text not null,
+                    action text not null,
+                    old_hash text,
+                    new_hash text,
+                    diff_summary text not null,
+                    status text not null,
+                    created_at text not null
+                );
                 """
             )
             _ensure_column(
@@ -144,18 +171,6 @@ class Store:
                 table="conversations",
                 column="agent_session_id",
                 definition="text",
-            )
-            _copy_column_if_empty(
-                conn,
-                table="conversations",
-                source_column="mode",
-                target_column="agent_mode",
-            )
-            _copy_column_if_empty(
-                conn,
-                table="conversations",
-                source_column="codex_session_id",
-                target_column="agent_session_id",
             )
 
     def ensure_conversation(self, conversation_id: str) -> Conversation:
@@ -391,6 +406,58 @@ class Store:
             return None
         return _channel_message_from_row(row)
 
+    def record_runtime_change(
+        self,
+        *,
+        run_id: str | None,
+        actor: str,
+        file: str,
+        action: str,
+        old_hash: str | None,
+        new_hash: str | None,
+        diff_summary: str,
+        status: str,
+    ) -> int:
+        """Append one sanitized runtime config change audit record."""
+
+        actor = actor.strip() or "unknown"
+        action = action.strip() or "runtime_change"
+        now = utc_now()
+        with self._lock, self._connect() as conn:
+            cursor = conn.execute(
+                """
+                insert into runtime_changes(
+                    run_id, actor, file, action, old_hash, new_hash,
+                    diff_summary, status, created_at
+                )
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    run_id or None,
+                    actor,
+                    file,
+                    action,
+                    old_hash,
+                    new_hash,
+                    diff_summary[:1000],
+                    status,
+                    now,
+                ),
+            )
+            return int(cursor.lastrowid)
+
+    def runtime_changes(self, *, limit: int = 50) -> list[RuntimeChangeRecord]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                select * from runtime_changes
+                order by id desc
+                limit ?
+                """,
+                (max(1, min(limit, 200)),),
+            ).fetchall()
+        return [_runtime_change_from_row(row) for row in rows]
+
     def get_run(self, run_id: str) -> RunRecord:
         with self._connect() as conn:
             row = conn.execute("select * from runs where run_id = ?", (run_id,)).fetchone()
@@ -481,6 +548,21 @@ def _channel_message_from_row(row: sqlite3.Row) -> ChannelMessageRecord:
     )
 
 
+def _runtime_change_from_row(row: sqlite3.Row) -> RuntimeChangeRecord:
+    return RuntimeChangeRecord(
+        id=int(row["id"]),
+        run_id=row["run_id"],
+        actor=str(row["actor"]),
+        file=str(row["file"]),
+        action=str(row["action"]),
+        old_hash=row["old_hash"],
+        new_hash=row["new_hash"],
+        diff_summary=str(row["diff_summary"]),
+        status=str(row["status"]),
+        created_at=str(row["created_at"]),
+    )
+
+
 def _optional_row_str(value: Any) -> str | None:
     if value is None:
         return None
@@ -499,23 +581,3 @@ def _ensure_column(
     if column in existing:
         return
     conn.execute(f"alter table {table} add column {column} {definition}")
-
-
-def _copy_column_if_empty(
-    conn: sqlite3.Connection,
-    *,
-    table: str,
-    source_column: str,
-    target_column: str,
-) -> None:
-    rows = conn.execute(f"pragma table_info({table})").fetchall()
-    existing = {str(row["name"]) for row in rows}
-    if source_column not in existing or target_column not in existing:
-        return
-    conn.execute(
-        f"""
-        update {table}
-        set {target_column} = {source_column}
-        where {target_column} is null and {source_column} is not null
-        """
-    )

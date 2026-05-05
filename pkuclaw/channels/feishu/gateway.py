@@ -1,37 +1,69 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
-import threading
+from concurrent.futures import Executor
+from dataclasses import dataclass
+from typing import Any, ClassVar
 
-from pkuclaw.agents import AgentWrapper
 from pkuclaw.config import Settings
 from pkuclaw.core import logging as log
 from pkuclaw.core.app import CoreRuntime
-from pkuclaw.core.store import Store
-from pkuclaw.loop import LoopManager
-from pkuclaw.mcp import ChannelToolServer
-from pkuclaw.runtime_config import RuntimeConfigLoader
 
-from .cards import FeishuCardRenderer
+from .cards import FeishuCardKitClient, FeishuCardRenderer
 from .handlers import FeishuEventHandlers
 from .sdk import (
+    FeishuSdk,
     build_api_client,
     build_cardkit_client,
     build_event_handler,
     load_feishu_sdk,
     new_ws_client,
 )
-from .tools import FeishuChannelToolBackend
+from .tools import FeishuChannelOutboundBackend
 
 
-def run_feishu_bot(
-    settings: Settings,
+@dataclass
+class FeishuRealtimeGateway:
+    """Thin Feishu websocket transport adapter around an existing CoreRuntime."""
+
+    channel: ClassVar[str] = "feishu"
+
+    settings: Settings
+    core_runtime: CoreRuntime
+    run_executor: Executor
+    callback_executor: Executor
+    sdk: FeishuSdk
+    app_secret: str
+    api_client: Any
+    message_client: FeishuCardKitClient
+    card_renderer: FeishuCardRenderer
+    event_handler: Any
+    channel_backend: FeishuChannelOutboundBackend
+
+    def start(self) -> None:
+        """Connect the Feishu websocket and block until the SDK client returns."""
+
+        log.stage("Connecting Feishu websocket")
+        client = new_ws_client(
+            sdk=self.sdk,
+            app_id=self.settings.feishu.app_id,
+            app_secret=self.app_secret,
+            event_handler=self.event_handler,
+            domain=self.settings.feishu.api_base,
+        )
+        log.ok("Startup complete; waiting for Feishu messages")
+        client.start()
+
+
+def build_feishu_realtime_gateway(
     *,
-    enable_loop: bool = False,
-    enable_mcp: bool = False,
-) -> None:
-    """Start the Feishu websocket bot and reply to text messages."""
-    _log_runtime(settings)
+    settings: Settings,
+    core_runtime: CoreRuntime,
+    run_executor: Executor,
+    callback_executor: Executor,
+) -> FeishuRealtimeGateway:
+    """Build Feishu SDK clients, renderer, handlers, and websocket adapter."""
+
+    _log_gateway(settings)
     _require_websocket_mode(settings)
 
     log.stage("Loading Feishu SDK")
@@ -50,21 +82,11 @@ def run_feishu_bot(
     )
     message_client = build_cardkit_client(sdk=sdk, api_client=api_client)
     card_renderer = FeishuCardRenderer()
+    channel_backend = FeishuChannelOutboundBackend(
+        client=message_client,
+        renderer=card_renderer,
+    )
     log.ok("Feishu API client ready")
-
-    store = _open_store(settings)
-    core_runtime = _build_core_runtime(settings=settings, store=store)
-    executor = ThreadPoolExecutor(max_workers=settings.codex.max_concurrent_runs)
-    callback_executor = ThreadPoolExecutor(max_workers=2)
-    log.ok(f"Agent worker pool ready: max_workers={settings.codex.max_concurrent_runs}")
-    if enable_mcp:
-        _start_mcp_thread(
-            settings=settings,
-            message_client=message_client,
-            card_renderer=card_renderer,
-        )
-    if enable_loop:
-        _start_loop_manager(settings=settings, core_runtime=core_runtime)
 
     handlers = FeishuEventHandlers(
         settings=settings,
@@ -72,7 +94,7 @@ def run_feishu_bot(
         message_client=message_client,
         card_renderer=card_renderer,
         card_action_response_cls=sdk.card_action_response,
-        executor=executor,
+        executor=run_executor,
         callback_executor=callback_executor,
     )
     event_handler = build_event_handler(sdk=sdk, handlers=handlers)
@@ -81,68 +103,29 @@ def run_feishu_bot(
         "message_receive, bot_menu, card_action, message_read(no-op)"
     )
 
-    log.stage("Connecting Feishu websocket")
-    client = new_ws_client(
+    return FeishuRealtimeGateway(
+        settings=settings,
+        core_runtime=core_runtime,
+        run_executor=run_executor,
+        callback_executor=callback_executor,
         sdk=sdk,
-        app_id=settings.feishu.app_id,
         app_secret=app_secret,
+        api_client=api_client,
+        message_client=message_client,
+        card_renderer=card_renderer,
         event_handler=event_handler,
-        domain=settings.feishu.api_base,
+        channel_backend=channel_backend,
     )
-    log.ok("Startup complete; waiting for Feishu messages")
-    client.start()
 
 
-def _start_loop_manager(*, settings: Settings, core_runtime: CoreRuntime) -> None:
-    loop_manager = LoopManager(settings=settings, core_runtime=core_runtime)
-    thread = threading.Thread(
-        target=loop_manager.run_forever,
-        name="pkuclaw-loop-manager",
-        daemon=True,
-    )
-    thread.start()
-    log.ok("LoopManager started")
-
-
-def _start_mcp_thread(
-    *,
-    settings: Settings,
-    message_client: object,
-    card_renderer: FeishuCardRenderer,
-) -> None:
-    backend = FeishuChannelToolBackend(
-        client=message_client,  # type: ignore[arg-type]
-        renderer=card_renderer,
-    )
-    server = ChannelToolServer(
-        host=settings.mcp.host,
-        port=settings.mcp.port,
-        backend=backend,
-    )
-    thread = threading.Thread(
-        target=server.serve_forever,
-        name="pkuclaw-mcp",
-        daemon=True,
-    )
-    thread.start()
-    log.ok(f"MCP server thread started: {settings.mcp.host}:{settings.mcp.port}")
-
-
-def _log_runtime(settings: Settings) -> None:
-    log.stage("Booting PkuClaw Feishu gateway")
+def _log_gateway(settings: Settings) -> None:
+    log.stage("Booting Feishu realtime gateway")
     log.startup_table(
-        "Runtime",
+        "Feishu",
         [
-            ("config", settings.config_path),
-            ("data_dir", settings.app.data_dir),
-            ("runtime_config_dir", settings.app.runtime_config_dir),
             ("feishu_mode", settings.feishu.event_mode),
             ("feishu_app_id", settings.feishu.app_id),
-            ("agent", settings.agent.provider),
-            ("codex_bin", settings.codex.bin),
-            ("codex_sandbox", settings.codex.sandbox),
-            ("codex_timeout", f"{settings.codex.timeout_seconds}s"),
-            ("max_workers", settings.codex.max_concurrent_runs),
+            ("feishu_api_base", settings.feishu.api_base),
         ],
     )
 
@@ -151,31 +134,3 @@ def _require_websocket_mode(settings: Settings) -> None:
     if settings.feishu.event_mode == "websocket":
         return
     raise RuntimeError(f"unsupported Feishu event mode: {settings.feishu.event_mode}")
-
-
-def _open_store(settings: Settings) -> Store:
-    log.stage("Opening local state store")
-    store = Store(settings.app.data_dir / "pkuclaw.db")
-    log.ok(
-        "State store ready: "
-        f"conversations={store.active_conversation_count()}, "
-        f"runs={sum(store.counts_by_status().values())}"
-    )
-    return store
-
-
-def _build_core_runtime(*, settings: Settings, store: Store) -> CoreRuntime:
-    log.stage("Building realtime runtime")
-    runtime_config = RuntimeConfigLoader(settings.app.runtime_config_dir)
-    agent_wrapper = AgentWrapper(
-        settings=settings,
-        store=store,
-        runtime_config=runtime_config,
-    )
-    core_runtime = CoreRuntime(
-        store=store,
-        agent_wrapper=agent_wrapper,
-        runtime_config=runtime_config,
-    )
-    log.ok("Realtime runtime ready: channel -> AgentWrapper -> Agent")
-    return core_runtime

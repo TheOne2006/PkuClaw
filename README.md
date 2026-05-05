@@ -7,7 +7,7 @@ and not tied to one agent provider.
 The core idea is:
 
 ```text
-Channels / Schedulers / Agent MCP
+Channels / LoopManager / Agent daemon-MCP calls
         -> CoreRuntime
         -> AgentWrapper
         -> Agent Provider (Codex now; Claude/Kimi later)
@@ -23,8 +23,9 @@ Channels / Schedulers / Agent MCP
   implementation; Web and WeChat are planned. Channels convert platform events
   into runtime messages and render `AgentEvent` streams back to users.
 - `LoopManager` is CoreRuntime's scheduler component. It hot-loads configured
-  loop specs and asks CoreRuntime to create periodic runs. Loop business logic
-  belongs to the agent and injected skills, not to the scheduler.
+  loop specs, tracks per-loop due times, prevents same-loop overlap by default,
+  and asks CoreRuntime to create periodic runs on worker threads. Loop business
+  logic belongs to the agent and injected skills, not to the scheduler.
 - `AgentWrapper` is the run compiler. Before every run it hot-loads runtime
   configuration, builds the full prompt, injects prompt fragments/sub-skills/tool
   docs, selects the agent provider, and writes run artifacts.
@@ -61,9 +62,10 @@ when live config is broken.
   fragments, skill registry, notification policy, and permissions belong here.
 - Runtime files are parsed and validated before use. On failure CoreRuntime uses
   the last valid snapshot; if none exists, immutable defaults are used.
-- Runtime writes should be atomic, backed up, and audited. The preferred write
-  path is daemon MCP -> CoreRuntime -> validated file update. Direct file edits
-  are still tolerated because the next hot-load validates and falls back safely.
+- Runtime writes are atomic, backed up, and audited when they go through daemon
+  MCP -> CoreRuntime -> validated file update. Direct human file edits are
+  validated on the next hot-load and can fall back safely, but they bypass the
+  runtime write audit path.
 
 ## Layout
 
@@ -75,7 +77,7 @@ pkuclaw/
   code_agents/      # concrete agent providers; Codex first
   mcp/              # MCP protocol layer and tool schemas -> CoreRuntime
   loop.py           # CoreRuntime-owned LoopManager implementation
-  runtime_config.py # hot-loaded live runtime config loader
+  runtime_config.py # hot-loaded live runtime config store
 configs/
   config.toml       # local boot secrets/config, ignored by git
   config.example.toml
@@ -90,20 +92,22 @@ tests/              # backend/runtime tests
 Implemented V1 pieces:
 
 - Feishu realtime adapter with CardKit streaming output.
+- Channel ingress/target/outbox/sink contracts in `pkuclaw/channels/base.py`.
 - Codex provider via `codex exec --json`.
 - SQLite store for conversations, runs, artifacts, and channel messages.
-- Runtime config loader with fallback warnings and hot-loaded loop specs.
+- RuntimeConfigStore with fallback warnings, hot-loaded loop specs, validation,
+  backup, atomic writes, and Store audit records.
 - CoreRuntime and LoopManager naming/model in the Python runtime.
-- Channel MCP tool server for sending/updating channel messages.
+- Daemon MCP server exposing channel outbox tools through CoreRuntime.
+- Daemon MCP runtime write tools for adding/updating/enabling/disabling loops
+  through CoreRuntime.
 
 Planned/ongoing architecture work:
 
 - Move runtime orchestration into a dedicated `pkuclaw/runtime/` package.
 - Split live runtime files into `runtime.json`, `loops.json`, `skills.json`,
-  and `prompts/`.
-- Add runtime MCP tools for config/loop/status operations.
-- Add audit/backup/atomic-write support for agent-modified runtime files.
-- Introduce channel and provider protocols for Web/WeChat and Claude/Kimi.
+  and `prompts/` when the scope needs separate files.
+- Introduce provider protocols for Claude/Kimi and concrete Web/WeChat adapters.
 
 ## Local Run
 
@@ -117,6 +121,12 @@ For Feishu realtime-only UI debugging:
 ```bash
 uv run pkuclaw realtime feishu
 ```
+
+The realtime Feishu path still builds `CoreRuntime`, `Store`,
+`RuntimeConfigStore`, and `AgentWrapper` through runtime bootstrap, but it does
+not start the daemon MCP server or `LoopManager`. This keeps the raw channel path
+clear for UI/debug work while preserving the same run compiler and runtime
+control plane used by the full daemon.
 
 ## Feishu Controls
 

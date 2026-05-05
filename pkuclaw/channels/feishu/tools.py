@@ -1,81 +1,88 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, ClassVar
 
-from pkuclaw.mcp import ChannelToolResult
+from pkuclaw.channels.base import (
+    ChannelOutboundResult,
+    ChannelTarget,
+)
 
 from .cards import FeishuCardKitClient, FeishuCardRenderer
 
 
 @dataclass
-class FeishuChannelToolBackend:
+class FeishuChannelOutboundBackend:
+    """Feishu implementation of the CoreRuntime-owned channel outbox contract."""
+
+    channel: ClassVar[str] = "feishu"
+
     client: FeishuCardKitClient
     renderer: FeishuCardRenderer
 
-    def channel_send_text(
-        self,
-        *,
-        target_id: str,
-        text: str,
-        target_type: str = "chat_id",
-    ) -> ChannelToolResult:
+    def send_text(self, *, target: ChannelTarget, text: str) -> ChannelOutboundResult:
         sent = self.client.send_card(
-            receive_id_type=target_type,
-            receive_id=target_id,
+            receive_id_type=target.target_type,
+            receive_id=target.target_id,
             card=self.renderer.control_card(title="PkuClaw", body=text),
         )
-        return ChannelToolResult(
+        return ChannelOutboundResult(
             ok=True,
             message="text sent",
+            target=target,
+            external_message_id=sent.message_id,
+            external_card_id=sent.card_id,
             data={"message_id": sent.message_id, "card_id": sent.card_id},
         )
 
-    def channel_send_card(
+    def send_card(
         self,
         *,
-        target_id: str,
+        target: ChannelTarget,
         card: dict[str, Any],
-        target_type: str = "chat_id",
-    ) -> ChannelToolResult:
+    ) -> ChannelOutboundResult:
         sent = self.client.send_card(
-            receive_id_type=target_type,
-            receive_id=target_id,
+            receive_id_type=target.target_type,
+            receive_id=target.target_id,
             card=card,
         )
-        return ChannelToolResult(
+        return ChannelOutboundResult(
             ok=True,
             message="card sent",
+            target=target,
+            external_message_id=sent.message_id,
+            external_card_id=sent.card_id,
             data={"message_id": sent.message_id, "card_id": sent.card_id},
         )
 
-    def channel_send_image(
+    def send_image(
         self,
         *,
-        target_id: str,
+        target: ChannelTarget,
         image_path: str,
-        target_type: str = "chat_id",
-    ) -> ChannelToolResult:
-        return ChannelToolResult(
+    ) -> ChannelOutboundResult:
+        return ChannelOutboundResult(
             ok=False,
             message="Feishu image upload is not implemented in V1",
+            target=target,
             data={
-                "target_id": target_id,
-                "target_type": target_type,
+                "target_id": target.target_id,
+                "target_type": target.target_type,
                 "image_path": image_path,
             },
         )
 
-    def channel_update_card(
+    def update_card(
         self,
         *,
         card_id: str,
         card: dict[str, Any],
         sequence: int,
-    ) -> ChannelToolResult:
+    ) -> ChannelOutboundResult:
         self.client.update_card(card_id=card_id, card=card, sequence=sequence)
-        return ChannelToolResult(
+        return ChannelOutboundResult(
             ok=True,
             message="card updated",
+            external_card_id=card_id,
             data={"card_id": card_id, "sequence": sequence},
         )

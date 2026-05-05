@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "skills": [
+    {
+      "name": "runtime/codex-subagent.md",
+      "intent": "runtime",
+      "dependencies": [],
+      "allowed_sources": ["realtime", "loop", "mcp", "manual", "system"],
+      "requires_confirmation": false
+    },
+    {
+      "name": "tasks/sync-notices.md",
+      "intent": "sync",
+      "dependencies": ["tools/pku3b-setup.md", "tools/data-parser.md"],
+      "allowed_sources": ["realtime", "loop"],
+      "requires_confirmation": false
+    },
+    {
+      "name": "tasks/do-homework.md",
+      "intent": "homework",
+      "dependencies": ["tools/pdf-reader.md", "tools/pku3b-setup.md"],
+      "allowed_sources": ["realtime"],
+      "requires_confirmation": true
+    },
+    {
+      "name": "tasks/write-notes.md",
+      "intent": "notes",
+      "dependencies": ["tools/pdf-reader.md"],
+      "allowed_sources": ["realtime", "loop"],
+      "requires_confirmation": false
+    },
+    {
+      "name": "tools/pku3b-setup.md",
+      "intent": "tool",
+      "dependencies": [],
+      "allowed_sources": ["realtime", "loop", "mcp", "manual", "system"],
+      "requires_confirmation": false
+    },
+    {
+      "name": "tools/data-parser.md",
+      "intent": "tool",
+      "dependencies": [],
+      "allowed_sources": ["realtime", "loop", "mcp", "manual", "system"],
+      "requires_confirmation": false
+    },
+    {
+      "name": "tools/pdf-reader.md",
+      "intent": "tool",
+      "dependencies": [],
+      "allowed_sources": ["realtime", "loop", "mcp", "manual", "system"],
+      "requires_confirmation": false
+    }
+  ]
+}

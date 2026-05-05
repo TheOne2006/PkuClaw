@@ -16,9 +16,10 @@ from pkuclaw.core.models import (
     merge_agent_settings,
 )
 from pkuclaw.core.store import RunRecord, Store
-from pkuclaw.runtime_config import RuntimeConfig, RuntimeConfigLoader
+from pkuclaw.mcp.schemas import render_tool_prompt
+from pkuclaw.runtime_config import RuntimeConfig, RuntimeConfigStore
 from pkuclaw.code_agents.codex import CodexAgent
-from pkuclaw.code_agents.subskills import render_subskills
+from pkuclaw.code_agents.subskills import load_skill_registry, render_subskills
 
 
 @dataclass(frozen=True)
@@ -29,14 +30,14 @@ class PreparedAgentRun:
 
 
 class AgentWrapper:
-    """Daemon-owned layer that turns PkuClaw context into agent work."""
+    """Run compiler that turns CoreRuntime requests into provider executions."""
 
     def __init__(
         self,
         *,
         settings: Settings,
         store: Store,
-        runtime_config: RuntimeConfigLoader,
+        runtime_config: RuntimeConfigStore,
         repo_root: Path | None = None,
     ) -> None:
         self.settings = settings
@@ -131,7 +132,7 @@ class AgentWrapper:
         plan: TaskPlan,
     ) -> AgentRunContext:
         conversation = self.store.ensure_conversation(run.conversation_id)
-        runtime = self.runtime_config.read()
+        runtime = self.runtime_config.read_snapshot()
         agent_settings = merge_agent_settings(
             _settings_from_runtime(runtime),
             conversation.agent_settings,
@@ -145,10 +146,18 @@ class AgentWrapper:
             runtime.prompt.default_skill_names,
             request.skill_names,
         )
+        skills_dir = self.repo_root / "sub-skills"
+        skill_registry = load_skill_registry(
+            self.runtime_config.config_dir / "skills.json",
+            skills_dir=skills_dir,
+        )
         rendered_skills = render_subskills(
             skill_names,
-            skills_dir=self.repo_root / "sub-skills",
+            skills_dir=skills_dir,
+            registry=skill_registry,
+            source=request.source,
         )
+        warnings = (*runtime.warnings, *skill_registry.warnings)
         return AgentRunContext(
             run=run,
             request=request,
@@ -161,17 +170,21 @@ class AgentWrapper:
             recent_runs_text=self._recent_runs_text(run),
             rendered_skills=rendered_skills,
             prompt_fragments=self._render_prompt_fragments(runtime),
-            channel_tools_text=_channel_tools_text(),
-            warnings=runtime.warnings,
+            mcp_tools_text=render_tool_prompt(),
+            warnings=warnings,
         )
 
     def build_run_prompt(self, context: AgentRunContext) -> str:
         source_note = (
             "This is a realtime user-facing chat run."
             if context.request.source == "realtime"
-            else "This is a periodic loop run. Stay silent unless important notification is needed."
+            else (
+                "This is a scheduled loop run created by LoopManager. "
+                "It is silent by default."
+            )
         )
         warnings = "\n".join(f"- {item}" for item in context.warnings) or "- none"
+        loop_context = self._loop_context_text(context)
         return f"""# PkuClaw Agent Run
 
 You are an agent invoked by PkuClaw Daemon through AgentWrapper.
@@ -188,6 +201,10 @@ You are an agent invoked by PkuClaw Daemon through AgentWrapper.
 - Runtime config: `{context.runtime.path}`
 - Runtime warnings:
 {warnings}
+
+## Loop Context
+
+{loop_context}
 
 ## Agent Settings
 
@@ -208,11 +225,11 @@ You are an agent invoked by PkuClaw Daemon through AgentWrapper.
 
 - For realtime runs, write the final answer as a natural chat reply to the user.
 - Do not mention prompt files, stdout files, run IDs, card layout, or internal artifacts unless the user asks about implementation/debugging.
-- For loop runs, update local state and stay silent unless an important notification is needed.
+- For loop runs, update local state and stay silent by default. If there is an important notification, use daemon MCP channel tools and respect the loop notify policy.
 
 ## Daemon MCP Tools
 
-{context.channel_tools_text}
+{context.mcp_tools_text}
 
 ## Prompt Fragments
 
@@ -242,6 +259,30 @@ You are an agent invoked by PkuClaw Daemon through AgentWrapper.
             "standard": "medium",
             "deep": "high",
         }.get(context.agent_settings.mode or "", "default")
+
+    def _loop_context_text(self, context: AgentRunContext) -> str:
+        if context.request.source != "loop":
+            return "- Not a loop run."
+        channel_context = context.request.channel_context
+        target = channel_context.get("target")
+        lines = [
+            "- This run was scheduled by CoreRuntime's LoopManager.",
+            "- Default behavior: stay silent; do not send user-visible updates unless important.",
+            "- If notification is important, use daemon MCP channel tools instead of relying on the final answer.",
+            f"- Loop ID: `{channel_context.get('loop_id') or 'unknown'}`",
+            f"- Scheduled at: `{channel_context.get('scheduled_at') or 'unknown'}`",
+            f"- Sink mode: `{context.request.sink_mode}`",
+            f"- Notify policy: `{channel_context.get('notify_policy') or 'important_only'}`",
+        ]
+        if isinstance(target, dict):
+            lines.append(
+                "- Default notification target: "
+                f"`{target.get('channel')}` / `{target.get('target_type')}` / "
+                f"`{target.get('target_id')}`."
+            )
+        else:
+            lines.append("- Default notification target: not configured.")
+        return "\n".join(lines)
 
     def _recent_runs_text(self, run: RunRecord) -> str:
         recent = self.store.recent_runs(conversation_id=run.conversation_id, limit=5)
@@ -297,14 +338,3 @@ def _merge_skill_names(
             merged.append(name)
             seen.add(name)
     return tuple(merged)
-
-
-def _channel_tools_text() -> str:
-    return """Daemon MCP tools may be available when the CoreRuntime MCP server is configured. Current V1 exposes channel outbox tools:
-
-- `channel_send_text`: send a plain text notification through the current channel backend.
-- `channel_send_card`: send a structured card through the current channel backend.
-- `channel_send_image`: send an image through the current channel backend.
-- `channel_update_card`: update a previously sent card.
-
-Use channel tools only for proactive notifications or loop-triggered messages. Normal realtime replies are streamed by the active channel adapter and do not require calling channel tools. Runtime control tools are planned for config, loop, and status operations."""

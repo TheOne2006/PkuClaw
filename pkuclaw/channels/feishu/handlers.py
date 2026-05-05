@@ -1,16 +1,21 @@
 from __future__ import annotations
 
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Executor
 from dataclasses import dataclass, field
 from typing import Any
 
+from pkuclaw.channels.base import ChannelInboundMessage, ChannelTarget
 from pkuclaw.config import Settings
 from pkuclaw.core import logging as log
 from pkuclaw.core.app import CoreRuntime
-from pkuclaw.core.models import ChannelMessage
 
-from .cards import FeishuCardKitClient, FeishuCardRenderer, FeishuRunCardSink
+from .cards import (
+    FeishuCardKitClient,
+    FeishuCardRenderer,
+    FeishuRunCardSink,
+    FeishuRunCardSinkFactory,
+)
 from .detail import send_control_card, send_run_detail_card
 from .events import (
     card_action_operator_open_id,
@@ -45,8 +50,8 @@ class FeishuEventHandlers:
     message_client: FeishuCardKitClient
     card_renderer: FeishuCardRenderer
     card_action_response_cls: Any
-    executor: ThreadPoolExecutor
-    callback_executor: ThreadPoolExecutor
+    executor: Executor
+    callback_executor: Executor
     chat_locks: ChatLocks = field(default_factory=ChatLocks)
 
     def on_message(self, data: Any) -> None:
@@ -61,15 +66,21 @@ class FeishuEventHandlers:
             return
 
         text = extract_text_content(getattr(message, "content", ""))
-        dispatch = self.core_runtime.ingest(
-            ChannelMessage(
-                channel="feishu",
-                conversation_id=feishu_conversation_id(sender_id),
-                sender_id=sender_id,
-                text=text,
-                raw=data,
-            )
+        target = ChannelTarget(
+            channel="feishu",
+            target_type="chat_id",
+            target_id=chat_id,
         )
+        envelope = ChannelInboundMessage(
+            channel="feishu",
+            conversation_id=feishu_conversation_id(sender_id),
+            sender_id=sender_id,
+            target=target,
+            text=text,
+            external_message_id=getattr(message, "message_id", None),
+            raw=data,
+        )
+        dispatch = self.core_runtime.ingest_channel_message(envelope)
         log.event(
             "message received: "
             f"chat={short_id(chat_id)}, sender={short_id(sender_id)}, "
@@ -77,24 +88,28 @@ class FeishuEventHandlers:
             f"local={dispatch.handled_locally}"
         )
         if dispatch.run_id is None or dispatch.plan is None:
+            reply_target = dispatch.channel_target or target
             send_control_card(
                 message_client=self.message_client,
                 renderer=self.card_renderer,
-                receive_id_type="chat_id",
-                receive_id=chat_id,
+                receive_id_type=reply_target.target_type,
+                receive_id=reply_target.target_id,
                 text=dispatch.reply_text,
             )
             log.ok("local control card sent")
             return
         if dispatch.agent_request is None:
             raise RuntimeError("agent request is missing for realtime run")
+        if dispatch.channel_target is None:
+            raise RuntimeError("channel target is missing for realtime run")
 
-        sink = FeishuRunCardSink(
+        sink = FeishuRunCardSinkFactory(
             client=self.message_client,
             renderer=self.card_renderer,
-            store=self.core_runtime.store,
-            chat_id=chat_id,
+        ).create_realtime_sink(
+            target=dispatch.channel_target,
             run_id=dispatch.run_id,
+            store=self.core_runtime.store,
         )
         try:
             sink.start()
@@ -109,8 +124,8 @@ class FeishuEventHandlers:
         self.executor.submit(
             process_code_agent_run,
             self.core_runtime,
-            self.chat_locks.for_chat(chat_id),
-            chat_id,
+            self.chat_locks.for_chat(dispatch.channel_target.target_id),
+            dispatch.channel_target.target_id,
             dispatch.run_id,
             dispatch.plan,
             dispatch.agent_request,
@@ -127,11 +142,17 @@ class FeishuEventHandlers:
             log.warn("bot menu event missing event_key/open_id")
             return
 
-        dispatch = self.core_runtime.ingest(
-            ChannelMessage(
+        target = ChannelTarget(
+            channel="feishu",
+            target_type="open_id",
+            target_id=open_id,
+        )
+        dispatch = self.core_runtime.ingest_channel_message(
+            ChannelInboundMessage(
                 channel="feishu",
                 conversation_id=feishu_conversation_id(open_id),
                 sender_id=open_id,
+                target=target,
                 text="",
                 event_key=event_key,
                 raw=data,
@@ -142,11 +163,12 @@ class FeishuEventHandlers:
             f"sender={short_id(open_id)}, key={event_key}, "
             f"local={dispatch.handled_locally}"
         )
+        reply_target = dispatch.channel_target or target
         send_control_card(
             message_client=self.message_client,
             renderer=self.card_renderer,
-            receive_id_type="open_id",
-            receive_id=open_id,
+            receive_id_type=reply_target.target_type,
+            receive_id=reply_target.target_id,
             text=dispatch.reply_text,
         )
         log.ok(f"menu card sent: key={event_key}, sender={short_id(open_id)}")

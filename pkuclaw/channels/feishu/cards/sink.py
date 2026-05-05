@@ -5,6 +5,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from pkuclaw.channels.base import ChannelTarget
 from pkuclaw.core import logging as log
 from pkuclaw.core.models import AgentEvent, AgentEventSink
 from pkuclaw.core.store import Store
@@ -23,7 +24,7 @@ class FeishuRunCardSink(AgentEventSink):
     client: FeishuCardKitClient
     renderer: FeishuCardRenderer
     store: Store
-    chat_id: str
+    target: ChannelTarget
     run_id: str
     started_at: float = field(default_factory=time.monotonic)
     message_id: str | None = None
@@ -43,16 +44,16 @@ class FeishuRunCardSink(AgentEventSink):
             started_at=self.started_at,
         )
         sent_card = self.client.send_card(
-            receive_id_type="chat_id",
-            receive_id=self.chat_id,
+            receive_id_type=self.target.target_type,
+            receive_id=self.target.target_id,
             card=card,
         )
         self.message_id = sent_card.message_id
         self.card_id = sent_card.card_id
         self.store.record_channel_message(
             run_id=self.run_id,
-            channel="feishu",
-            target_id=self.chat_id,
+            channel=self.target.channel,
+            target_id=self.target.target_id,
             external_message_id=self.message_id,
         )
         log.ok(
@@ -174,3 +175,28 @@ class FeishuRunCardSink(AgentEventSink):
     def _next_sequence(self) -> int:
         self.update_sequence += 1
         return self.update_sequence
+
+
+@dataclass(frozen=True)
+class FeishuRunCardSinkFactory:
+    client: FeishuCardKitClient
+    renderer: FeishuCardRenderer
+
+    def create_realtime_sink(
+        self,
+        *,
+        target: ChannelTarget,
+        run_id: str,
+        store: Store,
+    ) -> FeishuRunCardSink:
+        if target.channel != "feishu":
+            raise RuntimeError(
+                f"Feishu sink received non-Feishu target: {target.channel}"
+            )
+        return FeishuRunCardSink(
+            client=self.client,
+            renderer=self.renderer,
+            store=store,
+            target=target,
+            run_id=run_id,
+        )

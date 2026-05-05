@@ -6,9 +6,9 @@ from typing import Optional
 import click
 import typer
 
-from pkuclaw.channels.feishu import run_feishu_bot
 from pkuclaw.config import load_settings
 from pkuclaw.daemon import run_daemon
+from pkuclaw.runtime import run_feishu_realtime
 
 app = typer.Typer(help="PkuClaw daemon entrypoint.")
 realtime_app = typer.Typer(help="Development-only realtime entries.")
@@ -30,6 +30,6 @@ def realtime_feishu(
 ) -> None:
     """Run only the Feishu realtime path for UI/debug work."""
     try:
-        run_feishu_bot(load_settings(config), enable_loop=False, enable_mcp=False)
+        run_feishu_realtime(load_settings(config))
     except Exception as exc:
         raise click.ClickException(str(exc)) from exc
