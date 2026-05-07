@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from pkuclaw.agents.providers.codex import CodexAgent
 from pkuclaw.agents.wrapper import AgentWrapper
 from pkuclaw.channels.base import ChannelInboundMessage, ChannelTarget
 from pkuclaw.core.runtime import CoreRuntime
@@ -17,7 +18,7 @@ from pkuclaw.config import (
     MonitorConfig,
     Settings,
 )
-from pkuclaw.core.models import AgentRunRequest, TaskPlan
+from pkuclaw.core.models import AgentRunRequest, AgentSettings, TaskPlan
 from pkuclaw.core.store import Store
 from pkuclaw.mcp.schemas import list_tool_schemas, render_tool_prompt
 from pkuclaw.runtime.config import RuntimeConfigStore
@@ -204,6 +205,29 @@ class PromptArchitectureTests(unittest.TestCase):
         self.assertNotIn("Agent Settings", prompt)
         self.assertNotIn("# 任务：同步课程通知", prompt)
         self.assertIn("configs/runtime/skills/tasks/sync-notices.md", prompt)
+
+
+class CodexCommandConfigTests(unittest.TestCase):
+    def test_loop_mcp_tool_approval_mode_uses_server_scoped_approve(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            settings = _settings(Path(raw_tmp) / "data", ROOT / "configs" / "runtime")
+            agent = CodexAgent(settings=settings, repo_root=ROOT)
+            runtime = RuntimeConfigStore(ROOT / "configs" / "runtime").read_snapshot()
+            command = agent._build_command(  # noqa: SLF001 - command contract test
+                session_id=None,
+                result_path=Path(raw_tmp) / "result.md",
+                agent_settings=AgentSettings(),
+                runtime=runtime,
+                enable_mcp=True,
+            )
+
+        command_text = "\n".join(command)
+        self.assertIn('approvals_reviewer="auto_review"', command)
+        self.assertIn(
+            'mcp_servers.pkuclaw_daemon.default_tools_approval_mode="approve"',
+            command,
+        )
+        self.assertNotIn('default_tools_approval_mode="auto_review"', command_text)
 
 
 class SkillCatalogTests(unittest.TestCase):

@@ -23,7 +23,7 @@ from pkuclaw.core.models import (
 
 
 CODEX_APPROVAL_REVIEWER = "auto_review"
-CODEX_DEFAULT_TOOLS_APPROVAL_MODE = "auto_review"
+CODEX_MCP_DEFAULT_TOOLS_APPROVAL_MODE = "approve"
 
 
 class CodexAgent:
@@ -330,11 +330,6 @@ class CodexAgent:
             [
                 "-c",
                 f'approvals_reviewer="{CODEX_APPROVAL_REVIEWER}"',
-                "-c",
-                (
-                    "default_tools_approval_mode="
-                    f'"{CODEX_DEFAULT_TOOLS_APPROVAL_MODE}"'
-                ),
             ]
         )
 
@@ -345,6 +340,11 @@ class CodexAgent:
             [
                 "-c",
                 f'mcp_servers.pkuclaw_daemon.url="{url}"',
+                "-c",
+                (
+                    "mcp_servers.pkuclaw_daemon.default_tools_approval_mode="
+                    f'"{CODEX_MCP_DEFAULT_TOOLS_APPROVAL_MODE}"'
+                ),
             ]
         )
 
