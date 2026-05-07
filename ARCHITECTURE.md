@@ -1,6 +1,6 @@
 # PkuClaw Architecture
 
-PkuClaw uses a daemon-centered runtime model: two Agent run sources, editable runtime files, catalog-based skills, and a local notification HTTP API used by background loops through scripts.
+PkuClaw uses a daemon-centered runtime model: two Agent run sources, editable runtime files, catalog-based skills, and a local channel outbox queue used by realtime and loop runs through scripts.
 
 ## 1. Run sources
 
@@ -11,7 +11,7 @@ Only two Agent run sources exist:
 | `realtime` | User message or configured quick action | Answer the user directly with streaming channel UI. Ordinary messages have no preselected skills; quick actions may have suggested skills. |
 | `loop` | `LoopManager` scheduled tick | Run a configured background task. Stay silent unless important. |
 
-CoreRuntime does not classify user text into task categories. An ordinary realtime message creates `source="realtime"` and `suggested_skills=()`. A configured realtime quick action is loaded from `configs/runtime/events.json` and also creates `source="realtime"`. A loop creates `source="loop"` and uses the loop's configured `skill_names` plus the loop-only notification skill as suggested skills.
+CoreRuntime does not classify user text into task categories. An ordinary realtime message creates `source="realtime"` and `suggested_skills=()`. A configured realtime quick action is loaded from `configs/runtime/events.json` and also creates `source="realtime"`. A loop creates `source="loop"` and uses the loop's configured `skill_names` plus the channel outbox skill as suggested skills.
 
 ## 2. Runtime files
 
@@ -27,7 +27,7 @@ configs/runtime/
     runtime/            # runtime/config/skill authoring rules
     pku3b/              # pku3b install and usage docs
     tasks/              # user-facing study/course tasks
-    tools/              # shared helpers, including loop notification scripts
+    tools/              # shared helpers, including channel outbox scripts
 ```
 
 Agents read or edit these files directly when needed. Runtime configuration is not managed through an Agent protocol layer.
@@ -58,37 +58,37 @@ If `skills.json` is missing or invalid, the daemon keeps running with an empty c
 AgentWrapper branches by `source`:
 
 - `_build_realtime_prompt(context)` creates `# PkuClaw Realtime Task` with a short identity, reply rules, Skill Catalog, optional Suggested Skills for configured quick actions, and User Request.
-- `_build_loop_prompt(context)` creates `# PkuClaw Loop Task` with loop id, scheduled time, sink mode, notify policy, notification target, notification rules, the Notification Script Skill pointer, Skill Catalog, suggested skills, and Task.
+- `_build_loop_prompt(context)` creates `# PkuClaw Loop Task` with loop id, scheduled time, sink mode, notify policy, notification target, notification rules, the Channel Outbox Skill pointer, Skill Catalog, suggested skills, and Task.
 
 The wording/templates for both prompts are not hardcoded in `AgentWrapper`.
 They are hot-read from `configs/runtime/prompts.json` on each prompt build.
 Code only provides named variables such as `skill_catalog`, `user_request`,
-`loop_id`, and `notification_script_skill`; reusable prompt fragments such as
+`loop_id`, and `channel_outbox_skill`; reusable prompt fragments such as
 the realtime suggested-skills section also live in `prompts.json`.
 
-Realtime prompts do not include run ids, source labels, provider settings, repository paths, runtime paths, recent runs, notification scripts, or full skill markdown bodies.
+Realtime prompts do not include run ids, source labels, provider settings, repository paths, runtime paths, recent runs, outbox script bodies, or full skill markdown bodies.
 
 Loop prompts do not reuse realtime reply rules and do not include runtime management tools.
 
-## 6. Notification path
+## 6. Channel outbox path
 
-Background loop notifications use this path:
+Realtime artifact delivery and loop notifications use the same channel-neutral outbox path:
 
 ```text
-loop Agent -> channel-notifier skill -> scripts/pkuclaw_notify.py -> file queue -> daemon queue worker -> CoreRuntime -> channel backend
+Agent -> channel-outbox skill -> scripts/pkuclaw_outbox.py -> file queue -> daemon queue worker -> CoreRuntime -> channel backend
 ```
 
-The queue is file-backed under the app data directory by default, using `data/notify_queue/` with subdirectories such as `pending/`, `processing/`, `done/`, `failed/`, and `acks/`. Scripts do not open network sockets, do not call Feishu directly, do not parse runtime targets, and do not render cards. The daemon scans the queue about every 5 seconds and owns recipient resolution and channel delivery through CoreRuntime.
+The model-visible API is only text/image/file. The queue is file-backed under the app data directory by default, using `data/notify_queue/` with subdirectories such as `pending/`, `processing/`, `done/`, `failed/`, and `acks/`. Scripts do not open network sockets, do not call Feishu directly, do not parse runtime targets, and do not render cards. The daemon scans the queue about every 5 seconds and owns target resolution and channel delivery through CoreRuntime.
 
 ## 7. Loop behavior
 
 `LoopManager` hot-loads `configs/runtime/runtime.json`, schedules enabled loops, and asks CoreRuntime to create `source="loop"` runs. Loop prompts tell the Agent:
 
 - no important change: stay silent;
-- important change: enqueue through the Notification Script Skill;
+- important change: enqueue text/image/file through the Channel Outbox Skill;
 - final loop answers are for logs/artifacts and are not user-visible.
 
-Text/card notification requests contain only content plus optional loop id supplied by the provider environment/script layer. The daemon resolves a loop-specific `default_channel/default_target_type/default_target_id` override first, then falls back to the shared `notifications.default_channel/default_target_type/default_target_id`. If neither is configured, notification sends fail clearly instead of asking the Agent to guess a recipient.
+Outbox requests contain only text/image/file content plus run context supplied by provider environment variables. The daemon resolves the original run channel target first, then a loop-specific `default_channel/default_target_type/default_target_id` override, then the shared `notifications.default_channel/default_target_type/default_target_id`. If none is configured, sends fail clearly instead of asking the Agent to guess a recipient. Card creation and update-card are channel/runtime internals, not model-visible APIs.
 
 ## 8. Repository layout
 
@@ -108,7 +108,7 @@ pkuclaw/
     events.py         # configs/runtime/events.json
     prompts.py        # configs/runtime/prompts.json
     skills.py         # configs/runtime/skills.json + skills/**
-scripts/              # notification queue CLI
+scripts/              # channel outbox queue CLI
 configs/runtime/
   runtime.json
   events.json

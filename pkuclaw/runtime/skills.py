@@ -9,7 +9,7 @@ from typing import Any, Mapping
 
 
 BASE_SKILL_NAMES: tuple[str, ...] = ()
-NOTIFICATION_SKILL_NAME = "tools/channel-notifier.md"
+OUTBOX_SKILL_NAME = "tools/channel-outbox.md"
 SKILL_REGISTRY_FILE = "skills.json"
 SUPPORTED_SKILL_REGISTRY_SCHEMA_VERSION = 1
 ALLOWED_RUN_SOURCES = ("realtime", "loop")

@@ -102,14 +102,15 @@
       "path": "tools/pdf-reader.md"
     },
     {
-      "name": "tools/channel-notifier.md",
+      "name": "tools/channel-outbox.md",
       "dependencies": [],
       "allowed_sources": [
+        "realtime",
         "loop"
       ],
       "requires_confirmation": false,
-      "description": "loop 通知脚本：写入本地文件队列来发送文本、卡片、图片请求或更新卡片；daemon 扫描队列并负责目标解析和标准渲染。",
-      "path": "tools/channel-notifier.md"
+      "description": "通用 channel outbox：模型只可发送文本、图片或文件；daemon 负责目标解析，channel adapter 负责平台渲染。",
+      "path": "tools/channel-outbox.md"
     }
   ]
 }

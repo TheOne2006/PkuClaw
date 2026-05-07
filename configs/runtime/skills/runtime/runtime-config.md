@@ -27,7 +27,7 @@ configs/runtime/
 - 先读当前文件和相关 loader/schema，再修改。
 - 一次只改用户要求的最小范围。
 - 保持 `schema_version` 不变，除非同步修改 loader 和测试。
-- `realtime` prompt 不加入 notification scripts；`loop` prompt 默认静默，只能使用 notification scripts。
+- `realtime` prompt 不注入 outbox 脚本正文；`loop` prompt 默认静默，需要通知时只能使用 Channel Outbox Skill 的 text/image/file。
 - loop 不应自动执行提交作业、删除数据、登录交互、安装系统依赖等高风险动作。
 - 修改 `skills.json` 时，必须保证每个 `path` 指向存在的 markdown 文件。
 
@@ -77,7 +77,7 @@ configs/runtime/
 }
 ```
 
-通知脚本不接受 `channel`、`target_type` 或 `target_id` 参数；Agent 只传消息内容。loop id 默认由 provider 写入 `PKUCLAW_LOOP_ID`，必要时可用脚本的 `--loop-id` 显式覆盖。daemon 根据 loop id 自动使用 loop 覆盖目标，否则退回 `notifications` 默认目标。目标字段要么三个都写，要么都不写。
+outbox 脚本不接受 `channel`、`target_type` 或 `target_id` 参数；Agent 只传 text/image/file 内容。provider 会写入 `PKUCLAW_OUTBOX_QUEUE_DIR`、`PKUCLAW_RUN_ID`、`PKUCLAW_RUN_SOURCE`，loop 还会写入 `PKUCLAW_LOOP_ID`。daemon 优先根据 run id 使用原始 channel target，其次使用 loop 覆盖目标，否则退回 `notifications` 默认目标。目标字段要么三个都写，要么都不写。
 
 ### 调整 quick action
 

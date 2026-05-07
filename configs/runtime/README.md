@@ -13,7 +13,7 @@ configs/runtime/
     runtime/            # PkuClaw runtime/config/skill authoring rules
     pku3b/              # pku3b install and usage docs
     tasks/              # user-facing study/course tasks
-    tools/              # shared helpers, including loop notification scripts
+    tools/              # shared helpers, including channel outbox scripts
 ```
 
 ## Run sources
@@ -23,7 +23,7 @@ PkuClaw has only two Agent run sources:
 - `realtime`: a user message or configured quick action that should receive a direct streaming reply.
 - `loop`: a scheduled background task that stays silent unless it finds something important.
 
-There is no natural-language routing field. Ordinary realtime messages use `suggested_skills = ()` by default. Realtime quick actions use `configs/runtime/events.json`. Loop runs use the explicit `skill_names` configured on the loop entry in `runtime.json`; the daemon also suggests `tools/channel-notifier.md` for every loop run. Suggested skills are metadata, not injected full markdown bodies.
+There is no natural-language routing field. Ordinary realtime messages use `suggested_skills = ()` by default. Realtime quick actions use `configs/runtime/events.json`. Loop runs use the explicit `skill_names` configured on the loop entry in `runtime.json`; the daemon also suggests `tools/channel-outbox.md` for every loop run. Suggested skills are metadata, not injected full markdown bodies.
 
 ## Realtime quick actions
 
@@ -77,24 +77,25 @@ Prompt builders render only the Skill Catalog. Agents choose relevant skills and
 
 AgentWrapper hot-loads this file for each prompt build and fills named variables.
 Use doubled braces (`{{` and `}}`) if a template needs literal braces.
-Keep realtime templates user-facing and avoid notification script text there; keep loop templates silent-by-default and point to the Notification Script Skill.
+Keep realtime templates user-facing and avoid full outbox script bodies there; keep loop templates silent-by-default and point to the Channel Outbox Skill.
 
-## Notifications
+## Channel outbox
 
-Loop prompts point to the loop-only Notification Script Skill:
+Agents can use one channel-neutral outbox skill when they truly need to send a user-visible message outside the normal realtime streaming card:
 
-- `configs/runtime/skills/tools/channel-notifier.md`
+- `configs/runtime/skills/tools/channel-outbox.md`
 
-The documented script writes file-queue jobs for the daemon:
+The model-visible capabilities are intentionally limited to:
 
-- `python scripts/pkuclaw_notify.py text --message "..."`
-- `python scripts/pkuclaw_notify.py card --card-file card.json`
-- `python scripts/pkuclaw_notify.py image --image-path image.png` (currently unsupported by daemon)
-- `python scripts/pkuclaw_notify.py update-card --card-id ... --card-file card.json --sequence N`
+- `python scripts/pkuclaw_outbox.py text --text "..." --title "optional"`
+- `python scripts/pkuclaw_outbox.py image --path image.png --caption "optional"`
+- `python scripts/pkuclaw_outbox.py file --path result.pdf --caption "optional"`
 
-Use it only for important loop findings. Realtime prompts do not include notification scripts.
+There is no model-visible card/update-card API. Feishu cards, streaming card updates, Markdown rendering, resource uploads, and target ids are runtime/channel-adapter internals.
 
-Configure the shared loop notification target once under `notifications`:
+Realtime runs may use image/file to deliver generated artifacts, but should not send extra text that merely duplicates the realtime running card. Loop runs use outbox only when the Notification Policy says the user should be notified.
+
+Configure the shared loop fallback target once under `notifications`:
 
 ```json
 {
@@ -107,4 +108,4 @@ Configure the shared loop notification target once under `notifications`:
 }
 ```
 
-Individual loops may set the same three target fields to override the shared target for that loop. The provider sets `PKUCLAW_LOOP_ID` and `PKUCLAW_NOTIFY_QUEUE_DIR` for loop runs, scripts write jobs to that queue, and CoreRuntime resolves the loop override or shared default target.
+Individual loops may set the same three target fields to override the shared target for that loop. The provider sets `PKUCLAW_OUTBOX_QUEUE_DIR`, `PKUCLAW_RUN_ID`, and `PKUCLAW_RUN_SOURCE` for every run, plus `PKUCLAW_LOOP_ID` for loop runs. The daemon resolves a run target first, then loop override, then shared default.

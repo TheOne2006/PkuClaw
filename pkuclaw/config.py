@@ -61,7 +61,7 @@ class AgentConfig:
 
 @dataclass(frozen=True)
 class NotifyQueueConfig:
-    """loop notification 文件队列配置。"""
+    """channel outbox 文件队列配置。"""
     queue_dir: Path
     scan_interval_seconds: int
 
@@ -144,7 +144,7 @@ def load_settings(config_path: Path | None = None) -> Settings:
 
 
 def resolve_notify_queue_dir(settings: Settings) -> Path:
-    """Resolve the daemon/script notification queue directory."""
+    """Resolve the daemon/script outbox queue directory."""
 
     queue_dir = settings.notify_queue.queue_dir.expanduser()
     if queue_dir.is_absolute():

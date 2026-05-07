@@ -43,7 +43,7 @@ _NOTIFY_POLICY_DESCRIPTIONS = {
         "如果有重要变化，把重要变化置顶并给出建议动作。"
     ),
     "silent": (
-        "完全静默策略。不要主动调用 notification scripts；"
+        "完全静默策略。不要主动调用 channel outbox；"
         "只更新本地快照、摘要和最终日志。即使发现变化或错误，也不要通知用户，"
         "除非本次 Task 明确覆盖该策略。"
     ),
@@ -482,7 +482,7 @@ def _default_loops() -> tuple[RuntimeLoopConfig, ...]:
             id="sync_notices",
             enabled=True,
             interval_seconds=900,
-            prompt="检查课程状态、教学网通知和本地数据。如果没有重要变化，保持静默；如果发现重要变化，使用 Notification Script Skill 脚本通知用户。",
+            prompt="检查课程状态、教学网通知和本地数据。如果没有重要变化，保持静默；如果发现重要变化，使用 Channel Outbox Skill 发送简洁 text/image/file 通知用户。",
             skill_names=("tasks/sync-notices.md",),
             sink_mode="silent",
             prevent_overlap=True,
@@ -632,7 +632,7 @@ def _default_target_values(
     if any(value is not None for value in values) and not all(
         value is not None for value in values
     ):
-        # Partial targets are rejected because notification scripts need all
+        # Partial targets are rejected because channel outbox needs all
         # three fields to address a channel destination reliably.
         raise RuntimeError(
             f"{scope} requires default_channel, "

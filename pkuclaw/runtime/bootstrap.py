@@ -185,7 +185,7 @@ def _start_notify_queue_thread(
     )
     thread.start()
     log.ok(
-        "Notification queue worker started: "
+        "Outbox queue worker started: "
         f"{queue_dir} (scan={settings.notify_queue.scan_interval_seconds}s)"
     )
     return worker, thread

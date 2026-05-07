@@ -17,6 +17,10 @@ class FeishuSdk:
     card_model: Any
     create_card_request: Any
     create_card_request_body: Any
+    create_image_request: Any
+    create_image_request_body: Any
+    create_file_request: Any
+    create_file_request_body: Any
     create_message_request: Any
     create_message_request_body: Any
     update_card_request: Any
@@ -36,6 +40,10 @@ def load_feishu_sdk() -> FeishuSdk:
             UpdateCardRequestBody,
         )
         from lark_oapi.api.im.v1 import (
+            CreateFileRequest,
+            CreateFileRequestBody,
+            CreateImageRequest,
+            CreateImageRequestBody,
             CreateMessageRequest,
             CreateMessageRequestBody,
         )
@@ -52,6 +60,10 @@ def load_feishu_sdk() -> FeishuSdk:
         card_model=Card,
         create_card_request=CreateCardRequest,
         create_card_request_body=CreateCardRequestBody,
+        create_image_request=CreateImageRequest,
+        create_image_request_body=CreateImageRequestBody,
+        create_file_request=CreateFileRequest,
+        create_file_request_body=CreateFileRequestBody,
         create_message_request=CreateMessageRequest,
         create_message_request_body=CreateMessageRequestBody,
         update_card_request=UpdateCardRequest,
@@ -85,6 +97,10 @@ def build_cardkit_client(*, sdk: FeishuSdk, api_client: Any) -> FeishuCardKitCli
         create_message_request_body=sdk.create_message_request_body,
         create_card_request=sdk.create_card_request,
         create_card_request_body=sdk.create_card_request_body,
+        create_image_request=sdk.create_image_request,
+        create_image_request_body=sdk.create_image_request_body,
+        create_file_request=sdk.create_file_request,
+        create_file_request_body=sdk.create_file_request_body,
         update_card_request=sdk.update_card_request,
         update_card_request_body=sdk.update_card_request_body,
         card_model=sdk.card_model,

@@ -105,7 +105,7 @@ class CodexAgent:
                 timeout_seconds=self._effective_timeout(context.runtime),
                 sink=sink,
                 run_id=run.run_id,
-                env_overrides=self._loop_notification_env(context),
+                env_overrides=self._outbox_env(context),
             )
         except subprocess.TimeoutExpired as exc:
             stdout = _timeout_output(exc)
@@ -349,13 +349,13 @@ class CodexAgent:
         """合并 runtime 和启动配置后的 Codex 超时时间。"""
         return runtime.codex.timeout_seconds or self.settings.codex.timeout_seconds
 
-    def _loop_notification_env(self, context: AgentRunContext) -> dict[str, str]:
-        """Expose notification queue defaults to loop Codex processes."""
+    def _outbox_env(self, context: AgentRunContext) -> dict[str, str]:
+        """Expose outbox queue context to Codex processes."""
 
-        if context.request.source != "loop":
-            return {}
         env = {
-            "PKUCLAW_NOTIFY_QUEUE_DIR": str(resolve_notify_queue_dir(self.settings)),
+            "PKUCLAW_OUTBOX_QUEUE_DIR": str(resolve_notify_queue_dir(self.settings)),
+            "PKUCLAW_RUN_ID": context.run.run_id,
+            "PKUCLAW_RUN_SOURCE": context.request.source,
         }
         loop_id = _loop_id(context)
         if loop_id:

@@ -1,4 +1,4 @@
-"""Daemon-side file queue worker for loop notifications."""
+"""Daemon-side file queue worker for channel outbox messages."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -14,12 +14,13 @@ from pkuclaw.core import logging as log
 from pkuclaw.core.runtime import CoreRuntime
 
 
+OUTBOX_SCHEMA_VERSION = 2
 NotifyResponse = dict[str, Any]
 
 
 @dataclass
 class NotifyQueueWorker:
-    """Poll pending notification jobs and delegate delivery to CoreRuntime."""
+    """Poll pending outbox jobs and delegate delivery to CoreRuntime."""
 
     queue_dir: Path
     scan_interval_seconds: int
@@ -31,14 +32,14 @@ class NotifyQueueWorker:
 
         _ensure_dirs(self.queue_dir)
         log.ok(
-            "Notification queue scanning: "
+            "Outbox queue scanning: "
             f"{self.pending_dir} every {self.scan_interval_seconds}s"
         )
         while True:
             try:
                 self.process_pending()
             except Exception as exc:  # pragma: no cover - defensive daemon loop
-                log.warn(f"notification queue scan failed: {exc}")
+                log.warn(f"outbox queue scan failed: {exc}")
             time.sleep(self.scan_interval_seconds)
 
     @property
@@ -97,73 +98,72 @@ class NotifyQueueWorker:
         return True
 
     def handle_job(self, job: dict[str, Any]) -> NotifyResponse:
-        """Validate and execute one queue job."""
+        """Validate and execute one outbox queue job."""
 
         schema_version = job.get("schema_version")
-        if schema_version != 1:
-            raise RuntimeError("unsupported notification job schema_version")
+        if schema_version != OUTBOX_SCHEMA_VERSION:
+            raise RuntimeError("unsupported outbox job schema_version")
         kind = _required_str(job, "kind")
         payload = _required_object(job, "payload")
         if kind == "text":
             return self._send_text(job, payload)
-        if kind == "card":
-            return self._send_card(job, payload)
         if kind == "image":
-            return self._send_image(payload)
-        if kind == "card_update":
-            return self._update_card(payload)
-        raise RuntimeError(f"unsupported notification job kind: {kind}")
+            return self._send_image(job, payload)
+        if kind == "file":
+            return self._send_file(job, payload)
+        raise RuntimeError(f"unsupported outbox job kind: {kind}")
 
     def _send_text(self, job: dict[str, Any], payload: dict[str, Any]) -> NotifyResponse:
         text = _required_str(payload, "text")
-        target = self._notification_target(job)
+        title = _optional_str(payload, "title")
+        target = self._outbox_target(job)
         result = self.core_runtime.send_channel_text(
             channel=target["channel"],
             target_type=target["target_type"],
             target_id=target["target_id"],
             text=text,
+            title=title,
         )
         return _as_response(result)
 
-    def _send_card(self, job: dict[str, Any], payload: dict[str, Any]) -> NotifyResponse:
-        card = _required_object(payload, "card")
-        target = self._notification_target(job)
-        result = self.core_runtime.send_channel_card(
+    def _send_image(self, job: dict[str, Any], payload: dict[str, Any]) -> NotifyResponse:
+        path = _required_str(payload, "path")
+        caption = _optional_str(payload, "caption")
+        target = self._outbox_target(job)
+        result = self.core_runtime.send_channel_image(
             channel=target["channel"],
             target_type=target["target_type"],
             target_id=target["target_id"],
-            card=card,
+            image_path=path,
+            caption=caption,
         )
         return _as_response(result)
 
-    def _send_image(self, payload: dict[str, Any]) -> NotifyResponse:
-        image_path = _required_str(payload, "image_path")
-        return {
-            "ok": False,
-            "message": "image notification is not supported",
-            "data": {"image_path": image_path, "reason": "unsupported"},
-            "target": None,
-        }
-
-    def _update_card(self, payload: dict[str, Any]) -> NotifyResponse:
-        sequence = payload.get("sequence")
-        if not isinstance(sequence, int):
-            raise RuntimeError("sequence must be an integer")
-        result = self.core_runtime.update_channel_card(
-            channel=_optional_str(payload, "channel") or self.default_channel,
-            card_id=_required_str(payload, "card_id"),
-            card=_required_object(payload, "card"),
-            sequence=sequence,
+    def _send_file(self, job: dict[str, Any], payload: dict[str, Any]) -> NotifyResponse:
+        path = _required_str(payload, "path")
+        caption = _optional_str(payload, "caption")
+        target = self._outbox_target(job)
+        result = self.core_runtime.send_channel_file(
+            channel=target["channel"],
+            target_type=target["target_type"],
+            target_id=target["target_id"],
+            file_path=path,
+            caption=caption,
         )
         return _as_response(result)
 
-    def _notification_target(self, job: dict[str, Any]) -> dict[str, str]:
+    def _outbox_target(self, job: dict[str, Any]) -> dict[str, str]:
+        run_id = _optional_str(job, "run_id")
         loop_id = _optional_str(job, "loop_id")
-        target = self.core_runtime.resolve_notification_target(loop_id=loop_id)
+        target = self.core_runtime.resolve_outbox_target(
+            run_id=run_id,
+            loop_id=loop_id,
+        )
         if target is None:
             raise RuntimeError(
-                "no default notification target configured; set "
-                "notifications.default_channel/default_target_type/default_target_id"
+                "no outbox target configured; provide a run_id with channel target, "
+                "a loop_id with target override, or notifications.default_channel/"
+                "default_target_type/default_target_id"
             )
         return target
 
@@ -176,7 +176,7 @@ def _ensure_dirs(queue_dir: Path) -> None:
 def _read_job(path: Path) -> dict[str, Any]:
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
-        raise RuntimeError("notification job must be a JSON object")
+        raise RuntimeError("outbox job must be a JSON object")
     return data
 
 

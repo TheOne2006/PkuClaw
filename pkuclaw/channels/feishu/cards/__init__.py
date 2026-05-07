@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .client import FeishuCardKitClient, FeishuSentCard
+from .client import FeishuCardKitClient, FeishuSentCard, FeishuSentMedia
 from .renderer import FeishuCardRenderer
 from .sink import FeishuRunCardSink, FeishuRunCardSinkFactory
 
@@ -12,4 +12,5 @@ __all__ = [
     "FeishuRunCardSink",
     "FeishuRunCardSinkFactory",
     "FeishuSentCard",
+    "FeishuSentMedia",
 ]

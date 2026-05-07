@@ -36,7 +36,7 @@ from pkuclaw.runtime.config import (
 from pkuclaw.runtime.events import read_event_catalog, resolve_channel_event_id
 from pkuclaw.runtime.prompts import read_prompt_templates, render_prompt_template
 from pkuclaw.runtime.skills import (
-    NOTIFICATION_SKILL_NAME,
+    OUTBOX_SKILL_NAME,
     load_skill_registry,
     resolve_subskill_names,
 )
@@ -144,7 +144,7 @@ class PromptArchitectureTests(unittest.TestCase):
         self.assertNotIn("你正在执行 PkuClaw 的后台周期任务", wrapper_source)
         self.assertNotIn("## Suggested Skills", wrapper_source)
 
-    def test_realtime_prompt_is_minimal_and_has_no_notification_scripts(self) -> None:
+    def test_realtime_prompt_is_minimal_and_has_no_outbox_script_body(self) -> None:
         with tempfile.TemporaryDirectory() as raw_tmp:
             wrapper = _wrapper(Path(raw_tmp))
             request = AgentRunRequest(
@@ -165,10 +165,13 @@ class PromptArchitectureTests(unittest.TestCase):
         self.assertIn("# PkuClaw Realtime Task", prompt)
         self.assertIn("## Skill Catalog", prompt)
         self.assertIn("## User Request", prompt)
+        self.assertIn("configs/runtime/skills/tools/channel-outbox.md", prompt)
+        self.assertIn("不要在用户未要求时额外发送 text", prompt)
         self.assertNotIn("# PkuClaw Loop Task", prompt)
-        self.assertNotIn("## Notification Script Skill", prompt)
+        self.assertNotIn("## Channel Outbox Skill", prompt)
         self.assertNotIn("channel_send_text", prompt)
-        self.assertNotIn("pkuclaw_notify_text.py", prompt)
+        self.assertNotIn("pkuclaw_outbox.py", prompt)
+        self.assertNotIn("pkuclaw_outbox_legacy.py", prompt)
         self.assertNotIn("runtime_get_status", prompt)
         self.assertNotIn("Run ID", prompt)
         self.assertNotIn("Agent Settings", prompt)
@@ -179,7 +182,7 @@ class PromptArchitectureTests(unittest.TestCase):
         self.assertNotIn("## Suggested Skills", prompt)
         self.assertNotIn("# 任务：同步课程通知", prompt)
 
-    def test_loop_prompt_points_to_notification_script_skill(self) -> None:
+    def test_loop_prompt_points_to_channel_outbox_skill(self) -> None:
         with tempfile.TemporaryDirectory() as raw_tmp:
             wrapper = _wrapper(Path(raw_tmp))
             request = AgentRunRequest(
@@ -211,8 +214,8 @@ class PromptArchitectureTests(unittest.TestCase):
         self.assertIn("## Notification Policy", prompt)
         self.assertIn("只在重要变化或需要用户处理时通知", prompt)
         self.assertEqual(prompt.count("只在重要变化或需要用户处理时通知"), 1)
-        self.assertIn("## Notification Script Skill", prompt)
-        self.assertIn(NOTIFICATION_SKILL_NAME, prompt)
+        self.assertIn("## Channel Outbox Skill", prompt)
+        self.assertIn(OUTBOX_SKILL_NAME, prompt)
         self.assertNotIn("channel_send_text", prompt)
         self.assertNotIn("# PkuClaw Realtime Task", prompt)
         self.assertNotIn("runtime_get_config", prompt)
@@ -391,7 +394,7 @@ class RuntimeConfigTests(unittest.TestCase):
             },
         )
         self.assertEqual(inherited.agent_request.channel, "feishu")
-        self.assertIn(NOTIFICATION_SKILL_NAME, inherited.agent_request.suggested_skills)
+        self.assertIn(OUTBOX_SKILL_NAME, inherited.agent_request.suggested_skills)
         self.assertEqual(
             overridden.agent_request.channel_context["target"],
             {
@@ -675,33 +678,24 @@ class RuntimeEventTests(unittest.TestCase):
 
 
 class NotifyQueueTests(unittest.TestCase):
-    def test_notify_queue_text_uses_resolved_config_target_and_ack(self) -> None:
+    def test_outbox_text_uses_loop_override_target_and_title(self) -> None:
         class RecordingBackend:
             channel = "feishu"
 
             def __init__(self) -> None:
-                self.last_text: tuple[ChannelTarget, str] | None = None
+                self.last_text: tuple[ChannelTarget, str, str | None] | None = None
 
             def send_text(
                 self,
                 *,
                 target: ChannelTarget,
                 text: str,
+                title: str | None = None,
             ) -> ChannelOutboundResult:
-                self.last_text = (target, text)
-                return ChannelOutboundResult(
-                    ok=True,
-                    message="text sent",
-                    target=target,
-                    data={},
-                )
+                self.last_text = (target, text, title)
+                return ChannelOutboundResult(ok=True, message="text sent", target=target)
 
-            def send_card(
-                self,
-                *,
-                target: ChannelTarget,
-                card: dict,
-            ) -> ChannelOutboundResult:
+            def send_card(self, *, target: ChannelTarget, card: dict) -> ChannelOutboundResult:
                 return ChannelOutboundResult(ok=True, message="card sent", target=target)
 
             def send_image(
@@ -709,8 +703,18 @@ class NotifyQueueTests(unittest.TestCase):
                 *,
                 target: ChannelTarget,
                 image_path: str,
+                caption: str | None = None,
             ) -> ChannelOutboundResult:
                 return ChannelOutboundResult(ok=True, message="image sent", target=target)
+
+            def send_file(
+                self,
+                *,
+                target: ChannelTarget,
+                file_path: str,
+                caption: str | None = None,
+            ) -> ChannelOutboundResult:
+                return ChannelOutboundResult(ok=True, message="file sent", target=target)
 
             def update_card(
                 self,
@@ -769,11 +773,11 @@ class NotifyQueueTests(unittest.TestCase):
             (pending / "job-1.json").write_text(
                 json.dumps(
                     {
-                        "schema_version": 1,
+                        "schema_version": 2,
                         "job_id": "job-1",
                         "kind": "text",
                         "loop_id": "overrides_target",
-                        "payload": {"text": "覆盖成功"},
+                        "payload": {"text": "覆盖成功", "title": "课程提醒"},
                     },
                     ensure_ascii=False,
                 ),
@@ -788,28 +792,31 @@ class NotifyQueueTests(unittest.TestCase):
         self.assertEqual(ack["target"]["target_type"], "chat_id")
         self.assertEqual(ack["target"]["target_id"], "oc-loop")
         self.assertIsNotNone(backend.last_text)
-        target, text = backend.last_text
+        target, text, title = backend.last_text
         self.assertEqual(text, "覆盖成功")
+        self.assertEqual(title, "课程提醒")
         self.assertEqual(target.channel, "feishu")
         self.assertEqual(target.target_type, "chat_id")
         self.assertEqual(target.target_id, "oc-loop")
 
-    def test_notify_queue_card_update_and_image_unsupported(self) -> None:
+    def test_outbox_image_and_file_use_realtime_run_target(self) -> None:
         class RecordingBackend:
             channel = "feishu"
 
             def __init__(self) -> None:
-                self.updated: tuple[str, dict, int] | None = None
+                self.images: list[tuple[ChannelTarget, str, str | None]] = []
+                self.files: list[tuple[ChannelTarget, str, str | None]] = []
 
-            def send_text(self, *, target: ChannelTarget, text: str) -> ChannelOutboundResult:
-                return ChannelOutboundResult(ok=True, message="text sent", target=target)
-
-            def send_card(
+            def send_text(
                 self,
                 *,
                 target: ChannelTarget,
-                card: dict,
+                text: str,
+                title: str | None = None,
             ) -> ChannelOutboundResult:
+                return ChannelOutboundResult(ok=True, message="text sent", target=target)
+
+            def send_card(self, *, target: ChannelTarget, card: dict) -> ChannelOutboundResult:
                 return ChannelOutboundResult(ok=True, message="card sent", target=target)
 
             def send_image(
@@ -817,8 +824,32 @@ class NotifyQueueTests(unittest.TestCase):
                 *,
                 target: ChannelTarget,
                 image_path: str,
+                caption: str | None = None,
             ) -> ChannelOutboundResult:
-                return ChannelOutboundResult(ok=True, message="image sent", target=target)
+                self.images.append((target, image_path, caption))
+                return ChannelOutboundResult(
+                    ok=True,
+                    message="image sent",
+                    target=target,
+                    external_message_id="msg-image",
+                    data={"image_path": image_path},
+                )
+
+            def send_file(
+                self,
+                *,
+                target: ChannelTarget,
+                file_path: str,
+                caption: str | None = None,
+            ) -> ChannelOutboundResult:
+                self.files.append((target, file_path, caption))
+                return ChannelOutboundResult(
+                    ok=True,
+                    message="file sent",
+                    target=target,
+                    external_message_id="msg-file",
+                    data={"file_path": file_path},
+                )
 
             def update_card(
                 self,
@@ -827,28 +858,27 @@ class NotifyQueueTests(unittest.TestCase):
                 card: dict,
                 sequence: int,
             ) -> ChannelOutboundResult:
-                self.updated = (card_id, card, sequence)
-                return ChannelOutboundResult(
-                    ok=True,
-                    message="card updated",
-                    external_card_id=card_id,
-                    data={"sequence": sequence},
-                )
+                return ChannelOutboundResult(ok=True, message="card updated")
 
         with tempfile.TemporaryDirectory() as raw_tmp:
             tmp = Path(raw_tmp)
-            runtime_dir = tmp / "runtime"
-            runtime_dir.mkdir()
-            (runtime_dir / "runtime.json").write_text(
-                json.dumps({"schema_version": 1, "loops": []}),
-                encoding="utf-8",
+            wrapper = _wrapper(tmp)
+            request = AgentRunRequest(
+                source="realtime",
+                conversation_id="chat-media",
+                text="生成图和 PDF",
+                suggested_skills=(),
+                channel="feishu",
+                sender_id="ou-user",
+                channel_context={
+                    "target": {
+                        "channel": "feishu",
+                        "target_type": "open_id",
+                        "target_id": "ou-user",
+                    }
+                },
             )
-            wrapper = AgentWrapper(
-                settings=_settings(tmp / "data", runtime_dir),
-                store=Store(tmp / "pkuclaw.db"),
-                runtime_config=RuntimeConfigStore(runtime_dir),
-                repo_root=ROOT,
-            )
+            prepared = wrapper.prepare(request, TaskPlan(suggested_skills=(), ack="ok"))
             core_runtime = _core_runtime(wrapper)
             backend = RecordingBackend()
             core_runtime.register_channel_backend(backend)
@@ -859,45 +889,48 @@ class NotifyQueueTests(unittest.TestCase):
             )
             pending = worker.pending_dir
             pending.mkdir(parents=True)
-            (pending / "update.json").write_text(
-                json.dumps(
-                    {
-                        "schema_version": 1,
-                        "job_id": "update",
-                        "kind": "card_update",
-                        "payload": {
-                            "card_id": "card-1",
-                            "card": {"title": "new"},
-                            "sequence": 2,
-                        },
-                    },
-                ),
-                encoding="utf-8",
-            )
             (pending / "image.json").write_text(
                 json.dumps(
                     {
-                        "schema_version": 1,
+                        "schema_version": 2,
                         "job_id": "image",
                         "kind": "image",
-                        "payload": {"image_path": "/tmp/image.png"},
+                        "run_id": prepared.run_id,
+                        "run_source": "realtime",
+                        "payload": {"path": "/tmp/image.png", "caption": "结果图"},
                     },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            (pending / "file.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 2,
+                        "job_id": "file",
+                        "kind": "file",
+                        "run_id": prepared.run_id,
+                        "run_source": "realtime",
+                        "payload": {"path": "/tmp/result.pdf", "caption": "完整 PDF"},
+                    },
+                    ensure_ascii=False,
                 ),
                 encoding="utf-8",
             )
 
             processed = worker.process_pending()
-            update_ack = json.loads((worker.ack_dir / "update.json").read_text())
             image_ack = json.loads((worker.ack_dir / "image.json").read_text())
+            file_ack = json.loads((worker.ack_dir / "file.json").read_text())
 
         self.assertEqual(processed, 2)
-        self.assertTrue(update_ack["ok"])
-        self.assertEqual(update_ack["data"]["card_id"], "card-1")
-        self.assertEqual(backend.updated, ("card-1", {"title": "new"}, 2))
-        self.assertFalse(image_ack["ok"])
-        self.assertEqual(image_ack["data"]["reason"], "unsupported")
+        self.assertTrue(image_ack["ok"])
+        self.assertTrue(file_ack["ok"])
+        self.assertEqual(image_ack["target"]["target_id"], "ou-user")
+        self.assertEqual(file_ack["target"]["target_id"], "ou-user")
+        self.assertEqual(backend.images[0][1:], ("/tmp/image.png", "结果图"))
+        self.assertEqual(backend.files[0][1:], ("/tmp/result.pdf", "完整 PDF"))
 
-    def test_notify_queue_rejects_missing_default_target(self) -> None:
+    def test_outbox_rejects_card_update_and_missing_default_target(self) -> None:
         with tempfile.TemporaryDirectory() as raw_tmp:
             tmp = Path(raw_tmp)
             runtime_dir = tmp / "runtime"
@@ -926,10 +959,22 @@ class NotifyQueueTests(unittest.TestCase):
             )
             pending = worker.pending_dir
             pending.mkdir(parents=True)
+            (pending / "card.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 2,
+                        "job_id": "card",
+                        "kind": "card_update",
+                        "payload": {"card_id": "card-1"},
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
             (pending / "missing.json").write_text(
                 json.dumps(
                     {
-                        "schema_version": 1,
+                        "schema_version": 2,
                         "job_id": "missing",
                         "kind": "text",
                         "payload": {"text": "测试成功"},
@@ -939,28 +984,36 @@ class NotifyQueueTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            worker.process_pending()
-            ack = json.loads((worker.ack_dir / "missing.json").read_text())
+            processed = worker.process_pending()
+            card_ack = json.loads((worker.ack_dir / "card.json").read_text())
+            missing_ack = json.loads((worker.ack_dir / "missing.json").read_text())
 
-        self.assertFalse(ack["ok"])
-        self.assertIn("no default notification target", ack["message"])
+        self.assertEqual(processed, 2)
+        self.assertFalse(card_ack["ok"])
+        self.assertIn("unsupported outbox job kind", card_ack["message"])
+        self.assertFalse(missing_ack["ok"])
+        self.assertIn("no outbox target configured", missing_ack["message"])
 
-    def test_notify_script_enqueues_random_file_with_loop_env(self) -> None:
+    def test_outbox_script_enqueues_random_file_with_run_env(self) -> None:
         with tempfile.TemporaryDirectory() as raw_tmp:
             queue_dir = Path(raw_tmp) / "notify_queue"
             completed = subprocess.run(
                 [
                     sys.executable,
-                    str(ROOT / "scripts" / "pkuclaw_notify.py"),
+                    str(ROOT / "scripts" / "pkuclaw_outbox.py"),
                     "--no-wait",
                     "text",
-                    "--message",
+                    "--text",
                     "测试成功",
+                    "--title",
+                    "课程提醒",
                 ],
                 cwd=ROOT,
                 env={
                     "PATH": "",
-                    "PKUCLAW_NOTIFY_QUEUE_DIR": str(queue_dir),
+                    "PKUCLAW_OUTBOX_QUEUE_DIR": str(queue_dir),
+                    "PKUCLAW_RUN_ID": "run-test",
+                    "PKUCLAW_RUN_SOURCE": "loop",
                     "PKUCLAW_LOOP_ID": "test_loop",
                 },
                 text=True,
@@ -975,9 +1028,12 @@ class NotifyQueueTests(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertEqual(payload["message"], "queued")
         self.assertEqual(len(pending_files), 1)
+        self.assertEqual(job["schema_version"], 2)
         self.assertEqual(job["kind"], "text")
+        self.assertEqual(job["run_id"], "run-test")
+        self.assertEqual(job["run_source"], "loop")
         self.assertEqual(job["loop_id"], "test_loop")
-        self.assertEqual(job["payload"], {"text": "测试成功"})
+        self.assertEqual(job["payload"], {"text": "测试成功", "title": "课程提醒"})
         self.assertEqual(job["job_id"], payload["data"]["job_id"])
 
 

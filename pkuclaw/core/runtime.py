@@ -27,7 +27,7 @@ from pkuclaw.runtime.config import (
     RuntimeNotificationConfig,
 )
 from pkuclaw.runtime.events import RuntimeEventSpec, read_event_catalog
-from pkuclaw.runtime.skills import NOTIFICATION_SKILL_NAME
+from pkuclaw.runtime.skills import OUTBOX_SKILL_NAME
 
 
 class CoreRuntime:
@@ -82,6 +82,7 @@ class CoreRuntime:
         target_type: str,
         target_id: str,
         text: str,
+        title: str | None = None,
     ) -> ChannelOutboundResult:
         """Send a text notification through a channel backend."""
 
@@ -90,7 +91,11 @@ class CoreRuntime:
             target_type=target_type,
             target_id=target_id,
         )
-        return self.channel_backend(channel).send_text(target=target, text=text)
+        return self.channel_backend(channel).send_text(
+            target=target,
+            text=text,
+            title=title,
+        )
 
     def send_channel_card(
         self,
@@ -116,6 +121,7 @@ class CoreRuntime:
         target_type: str,
         target_id: str,
         image_path: str,
+        caption: str | None = None,
     ) -> ChannelOutboundResult:
         """Send an image through a channel backend."""
 
@@ -127,14 +133,43 @@ class CoreRuntime:
         return self.channel_backend(channel).send_image(
             target=target,
             image_path=image_path,
+            caption=caption,
         )
 
-    def resolve_notification_target(
+    def send_channel_file(
         self,
         *,
+        channel: str,
+        target_type: str,
+        target_id: str,
+        file_path: str,
+        caption: str | None = None,
+    ) -> ChannelOutboundResult:
+        """Send a file through a channel backend."""
+
+        target = ChannelTarget(
+            channel=channel,
+            target_type=target_type,
+            target_id=target_id,
+        )
+        return self.channel_backend(channel).send_file(
+            target=target,
+            file_path=file_path,
+            caption=caption,
+        )
+
+    def resolve_outbox_target(
+        self,
+        *,
+        run_id: str | None = None,
         loop_id: str | None = None,
     ) -> dict[str, str] | None:
-        """Resolve a loop-specific target override or the global default target."""
+        """Resolve a run target, loop override, or the global default target."""
+
+        if run_id:
+            target = _run_outbox_target(self.store.get_run_metadata(run_id))
+            if target is not None:
+                return target
 
         runtime = self.runtime_config.read_snapshot()
         if loop_id:
@@ -345,11 +380,39 @@ def _select_loop(
 
 
 def _loop_suggested_skills(skill_names: tuple[str, ...]) -> tuple[str, ...]:
-    """Append the loop notification skill to every loop run."""
+    """Append the channel outbox skill to every loop run."""
 
-    if NOTIFICATION_SKILL_NAME in skill_names:
+    if OUTBOX_SKILL_NAME in skill_names:
         return skill_names
-    return (*skill_names, NOTIFICATION_SKILL_NAME)
+    return (*skill_names, OUTBOX_SKILL_NAME)
+
+
+def _run_outbox_target(metadata: dict[str, Any]) -> dict[str, str] | None:
+    """Extract the original channel target from run metadata."""
+
+    channel = metadata.get("channel")
+    if not isinstance(channel, dict):
+        return None
+    target = channel.get("target")
+    if not isinstance(target, dict):
+        return None
+    raw_channel = target.get("channel")
+    target_type = target.get("target_type")
+    target_id = target.get("target_id")
+    if (
+        isinstance(raw_channel, str)
+        and raw_channel.strip()
+        and isinstance(target_type, str)
+        and target_type.strip()
+        and isinstance(target_id, str)
+        and target_id.strip()
+    ):
+        return {
+            "channel": raw_channel.strip(),
+            "target_type": target_type.strip(),
+            "target_id": target_id.strip(),
+        }
+    return None
 
 
 def _loop_notification_target(

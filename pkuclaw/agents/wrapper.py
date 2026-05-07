@@ -27,7 +27,7 @@ from pkuclaw.runtime.config import (
 from pkuclaw.runtime.prompts import read_prompt_templates, render_prompt_template
 from pkuclaw.agents.providers.codex import CodexAgent
 from pkuclaw.runtime.skills import (
-    NOTIFICATION_SKILL_NAME,
+    OUTBOX_SKILL_NAME,
     load_skill_registry,
     render_skill_catalog,
     render_suggested_skills,
@@ -186,9 +186,7 @@ class AgentWrapper:
             skill_catalog_text=skill_catalog_text,
             rendered_skills=suggested_skills_text,
             prompt_fragments="",
-            notification_script_text=(
-                _notification_script_text() if request.source == "loop" else ""
-            ),
+            outbox_script_text=_outbox_script_text(),
             warnings=warnings,
         )
 
@@ -237,7 +235,7 @@ class AgentWrapper:
                 "notify_policy": notify_policy,
                 "notify_policy_description": describe_notify_policy(notify_policy),
                 "notification_target": _notification_target_text(channel_context.get("target")),
-                "notification_script_skill": context.notification_script_text,
+                "channel_outbox_skill": context.outbox_script_text,
                 "skill_catalog": context.skill_catalog_text,
                 "suggested_skills": context.rendered_skills,
                 "task": context.request.text,
@@ -291,13 +289,14 @@ def _notification_target_text(value: object) -> str:
     return "not configured"
 
 
-def _notification_script_text() -> str:
-    """Render concise loop-facing notification script instructions."""
+def _outbox_script_text() -> str:
+    """Render concise outbox script instructions."""
 
     return (
-        "Use the notification script skill when this loop needs to notify the user. "
-        f"Read `configs/runtime/skills/{NOTIFICATION_SKILL_NAME}` and call the "
-        "documented queue-based Python script."
+        "Use the channel outbox skill only when you need to send text/image/file "
+        "outside the normal realtime streaming card. "
+        f"Read `configs/runtime/skills/{OUTBOX_SKILL_NAME}` and call the documented "
+        "queue-based Python script."
     )
 
 

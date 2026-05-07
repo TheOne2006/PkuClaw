@@ -41,7 +41,7 @@ class AgentRunContext:
     skill_catalog_text: str
     rendered_skills: str
     prompt_fragments: str
-    notification_script_text: str
+    outbox_script_text: str
     warnings: tuple[str, ...]
 
 

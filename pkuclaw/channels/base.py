@@ -79,7 +79,13 @@ class ChannelOutboundBackend(Protocol):
 
     channel: str
 
-    def send_text(self, *, target: ChannelTarget, text: str) -> ChannelOutboundResult:
+    def send_text(
+        self,
+        *,
+        target: ChannelTarget,
+        text: str,
+        title: str | None = None,
+    ) -> ChannelOutboundResult:
         """Send text to a channel target."""
 
     def send_card(
@@ -95,8 +101,18 @@ class ChannelOutboundBackend(Protocol):
         *,
         target: ChannelTarget,
         image_path: str,
+        caption: str | None = None,
     ) -> ChannelOutboundResult:
         """Send an image to a channel target."""
+
+    def send_file(
+        self,
+        *,
+        target: ChannelTarget,
+        file_path: str,
+        caption: str | None = None,
+    ) -> ChannelOutboundResult:
+        """Send a file to a channel target."""
 
     def update_card(
         self,

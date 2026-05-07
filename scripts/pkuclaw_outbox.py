@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Enqueue one PkuClaw notification job for the local daemon to deliver."""
+"""Enqueue one PkuClaw outbox job for the local daemon to deliver."""
 from __future__ import annotations
 
 import argparse
@@ -14,19 +14,33 @@ from typing import Any
 
 
 DEFAULT_QUEUE_DIR = "data/notify_queue"
+OUTBOX_SCHEMA_VERSION = 2
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--queue-dir",
-        default=os.environ.get("PKUCLAW_NOTIFY_QUEUE_DIR", DEFAULT_QUEUE_DIR),
-        help="Notification queue directory shared with the PkuClaw daemon.",
+        default=(
+            os.environ.get("PKUCLAW_OUTBOX_QUEUE_DIR")
+            or DEFAULT_QUEUE_DIR
+        ),
+        help="Outbox queue directory shared with the PkuClaw daemon.",
+    )
+    parser.add_argument(
+        "--run-id",
+        default=os.environ.get("PKUCLAW_RUN_ID", "").strip() or None,
+        help="Current PkuClaw run id used by the daemon to resolve the channel target.",
+    )
+    parser.add_argument(
+        "--run-source",
+        default=os.environ.get("PKUCLAW_RUN_SOURCE", "").strip() or None,
+        help="Current PkuClaw run source, usually realtime or loop.",
     )
     parser.add_argument(
         "--loop-id",
         default=os.environ.get("PKUCLAW_LOOP_ID", "").strip() or None,
-        help="Optional loop id used by the daemon to resolve target overrides.",
+        help="Optional loop id used as target fallback for loop runs.",
     )
     parser.add_argument(
         "--wait-seconds",
@@ -41,20 +55,17 @@ def main() -> int:
     )
     subparsers = parser.add_subparsers(dest="kind", required=True)
 
-    text = subparsers.add_parser("text", help="Enqueue a text notification.")
-    text.add_argument("--message", required=True, help="Text notification body.")
+    text = subparsers.add_parser("text", help="Enqueue a text outbox message.")
+    text.add_argument("--text", required=True, help="Markdown-capable text body.")
+    text.add_argument("--title", default=None, help="Optional human-facing title.")
 
-    card = subparsers.add_parser("card", help="Enqueue a structured card notification.")
-    card.add_argument("--card-file", required=True, type=Path, help="JSON card file.")
+    image = subparsers.add_parser("image", help="Enqueue an image outbox message.")
+    image.add_argument("--path", required=True, type=Path, help="Image path to send.")
+    image.add_argument("--caption", default=None, help="Optional image caption.")
 
-    image = subparsers.add_parser("image", help="Enqueue an image notification request.")
-    image.add_argument("--image-path", required=True, help="Image path to send.")
-
-    update = subparsers.add_parser("update-card", help="Enqueue a card update.")
-    update.add_argument("--card-id", required=True, help="External card id.")
-    update.add_argument("--card-file", required=True, type=Path, help="Replacement JSON card file.")
-    update.add_argument("--sequence", required=True, type=int, help="Card update sequence.")
-    update.add_argument("--channel", default=None, help="Channel name; defaults to daemon channel.")
+    file = subparsers.add_parser("file", help="Enqueue a file outbox message.")
+    file.add_argument("--path", required=True, type=Path, help="File path to send.")
+    file.add_argument("--caption", default=None, help="Optional file caption.")
 
     args = parser.parse_args()
     queue_dir = Path(args.queue_dir).expanduser()
@@ -87,29 +98,31 @@ def main() -> int:
 
 def _build_job(args: argparse.Namespace) -> dict[str, Any]:
     if args.kind == "text":
-        payload = {"text": args.message}
-    elif args.kind == "card":
-        payload = {"card": _read_json_object(args.card_file)}
+        payload = {"text": args.text}
+        if _optional_text(args.title):
+            payload["title"] = _optional_text(args.title)
     elif args.kind == "image":
-        payload = {"image_path": args.image_path}
-    elif args.kind == "update-card":
-        payload = {
-            "card_id": args.card_id,
-            "card": _read_json_object(args.card_file),
-            "sequence": args.sequence,
-        }
-        if args.channel:
-            payload["channel"] = args.channel
+        payload = {"path": str(args.path.expanduser())}
+        if _optional_text(args.caption):
+            payload["caption"] = _optional_text(args.caption)
+    elif args.kind == "file":
+        payload = {"path": str(args.path.expanduser())}
+        if _optional_text(args.caption):
+            payload["caption"] = _optional_text(args.caption)
     else:  # pragma: no cover - argparse enforces known subcommands
-        raise SystemExit(f"unsupported notification kind: {args.kind}")
+        raise SystemExit(f"unsupported outbox kind: {args.kind}")
 
     job: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": OUTBOX_SCHEMA_VERSION,
         "job_id": uuid.uuid4().hex,
-        "kind": "card_update" if args.kind == "update-card" else args.kind,
+        "kind": args.kind,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "payload": payload,
     }
+    if args.run_id:
+        job["run_id"] = args.run_id
+    if args.run_source:
+        job["run_source"] = args.run_source
     if args.loop_id:
         job["loop_id"] = args.loop_id
     return job
@@ -135,7 +148,7 @@ def _wait_for_ack(*, queue_dir: Path, job_id: str, wait_seconds: float) -> dict[
         time.sleep(0.2)
     return {
         "ok": False,
-        "message": "notification queued but daemon ack timed out",
+        "message": "outbox queued but daemon ack timed out",
         "data": {"job_id": job_id, "ack_path": str(ack_path)},
         "target": None,
     }
@@ -150,6 +163,13 @@ def _read_json_object(path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise SystemExit(f"JSON file must contain an object: {path}")
     return data
+
+
+def _optional_text(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    return stripped or None
 
 
 def _print_json(payload: dict[str, Any]) -> None:
