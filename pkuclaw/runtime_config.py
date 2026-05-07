@@ -93,7 +93,12 @@ class RuntimeConfigWriteResult:
 
 
 class RuntimeConfigStore:
-    """Safe hot-loaded runtime config store with fallback and atomic writes."""
+    """Hot-loaded runtime config store.
+
+    Public write methods are intentionally narrow: callers can add/update/
+    enable/disable loops, but cannot bypass validation, backup, atomic write,
+    and audit handled by CoreRuntime.
+    """
 
     def __init__(self, config_dir: Path) -> None:
         self.config_dir = config_dir
@@ -102,12 +107,12 @@ class RuntimeConfigStore:
 
     @property
     def path(self) -> Path:
-        """执行 path 逻辑。"""
+        """Canonical live runtime config file."""
         return self.config_dir / RUNTIME_CONFIG_FILE
 
     @property
     def backups_dir(self) -> Path:
-        """执行 backups dir 逻辑。"""
+        """Directory for automatic pre-write backups."""
         return self.config_dir / RUNTIME_BACKUP_DIR
 
     def read_snapshot(self) -> RuntimeConfig:
@@ -124,31 +129,6 @@ class RuntimeConfigStore:
                 return _with_warning(base, warning)
             self._last_valid = config
             return config
-
-    def list_loops(self) -> tuple[RuntimeLoopConfig, ...]:
-        """读取当前 runtime snapshot 中的 loop specs。"""
-        return self.read_snapshot().loops
-
-    def write_runtime_patch(
-        self,
-        patch: Mapping[str, Any],
-        *,
-        action: str = "runtime_patch",
-        diff_summary: str | None = None,
-    ) -> RuntimeConfigWriteResult:
-        """Merge a JSON-object patch into the current snapshot and commit safely."""
-
-        if not isinstance(patch, Mapping):
-            raise RuntimeError("runtime patch must be an object")
-        with self._lock:
-            base = _config_to_raw(self.read_snapshot())
-            candidate = _deep_merge(base, dict(patch))
-            summary = diff_summary or _patch_diff_summary(action, patch)
-            return self._commit_candidate(
-                candidate,
-                action=action,
-                diff_summary=summary,
-            )
 
     def add_loop(self, loop: Mapping[str, Any]) -> RuntimeConfigWriteResult:
         """校验新 loop，避免重复 id，然后走安全提交路径写入 runtime.json。"""
@@ -226,7 +206,7 @@ class RuntimeConfigStore:
             action="runtime_disable_loop",
         )
 
-    def backup_current(self) -> Path | None:
+    def _backup_current(self) -> Path | None:
         """Copy the current runtime.json to backups/ before a write."""
 
         with self._lock:
@@ -242,7 +222,7 @@ class RuntimeConfigStore:
             shutil.copy2(self.path, candidate)
             return candidate
 
-    def atomic_write_json(self, data: Mapping[str, Any]) -> None:
+    def _atomic_write_json(self, data: Mapping[str, Any]) -> None:
         """Write runtime.json via tmp + fsync + atomic rename."""
 
         with self._lock:
@@ -261,18 +241,18 @@ class RuntimeConfigStore:
                 if tmp_path.exists():
                     tmp_path.unlink()
 
-    def validate_config(self, raw: Mapping[str, Any]) -> RuntimeConfig:
+    def _validate_config(self, raw: Mapping[str, Any]) -> RuntimeConfig:
         """校验原始 runtime config 对象并返回规范化 RuntimeConfig。"""
         return _parse_config(raw, path=self.path)
 
     def _read_valid(self) -> RuntimeConfig:
-        """读取 valid 相关逻辑。"""
+        """Read runtime.json and reject invalid or unsupported content."""
         if not self.path.exists():
             raise FileNotFoundError(f"runtime config not found: {self.path}")
         raw = json.loads(self.path.read_text(encoding="utf-8"))
         if not isinstance(raw, dict):
             raise RuntimeError(f"runtime config must be a JSON object: {self.path}")
-        return self.validate_config(raw)
+        return self._validate_config(raw)
 
     def _commit_candidate(
         self,
@@ -284,13 +264,13 @@ class RuntimeConfigStore:
         """对候选配置执行校验、规范化、备份、原子写入和 last_valid 更新。"""
         # Validate before touching disk, then write the normalized representation
         # so future diffs and hashes are stable.
-        validated = self.validate_config(candidate)
+        validated = self._validate_config(candidate)
         normalized = _config_to_raw(validated)
         old_hash = _hash_file(self.path)
         new_hash = _hash_bytes(_json_text(normalized).encode("utf-8"))
-        backup_path = self.backup_current()
-        self.atomic_write_json(normalized)
-        committed = self.validate_config(normalized)
+        backup_path = self._backup_current()
+        self._atomic_write_json(normalized)
+        committed = self._validate_config(normalized)
         self._last_valid = committed
         return RuntimeConfigWriteResult(
             action=action,
@@ -675,12 +655,6 @@ def _deep_merge(base: Mapping[str, Any], patch: Mapping[str, Any]) -> dict[str, 
         else:
             result[key] = copy.deepcopy(value)
     return result
-
-
-def _patch_diff_summary(action: str, patch: Mapping[str, Any]) -> str:
-    """生成 runtime patch 的简短审计摘要。"""
-    keys = sorted(str(key) for key in patch.keys())
-    return f"{action} keys={','.join(keys) or 'none'}"
 
 
 def _loop_update_summary(

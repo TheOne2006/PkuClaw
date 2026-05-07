@@ -6,7 +6,7 @@ import time
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 
-from pkuclaw.agents import SilentSink
+from pkuclaw.agents.sinks import SilentSink
 from pkuclaw.config import Settings
 from pkuclaw.core import logging as log
 from pkuclaw.core.app import CoreRuntime

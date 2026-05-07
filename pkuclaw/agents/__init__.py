@@ -1,15 +1,5 @@
-"""Agent 抽象、运行上下文和事件 sink 的公共导出。"""
-from __future__ import annotations
+"""Agent package.
 
-from pkuclaw.agents.base import Agent, AgentRunContext, AgentRunPaths
-from pkuclaw.agents.sinks import SilentSink
-from pkuclaw.agents.wrapper import AgentWrapper, PreparedAgentRun
-
-__all__ = [
-    "Agent",
-    "AgentRunContext",
-    "AgentRunPaths",
-    "AgentWrapper",
-    "PreparedAgentRun",
-    "SilentSink",
-]
+Use explicit module imports such as ``pkuclaw.agents.wrapper``.  Avoiding
+barrel re-exports keeps the runtime dependency graph easier to follow.
+"""

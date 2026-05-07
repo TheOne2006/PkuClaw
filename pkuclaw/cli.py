@@ -8,8 +8,7 @@ import click
 import typer
 
 from pkuclaw.config import load_settings
-from pkuclaw.daemon import run_daemon
-from pkuclaw.runtime import run_feishu_realtime
+from pkuclaw.runtime.bootstrap import run_runtime
 
 app = typer.Typer(help="PkuClaw daemon entrypoint.")
 realtime_app = typer.Typer(help="Development-only realtime entries.")
@@ -20,7 +19,8 @@ app.add_typer(realtime_app, name="realtime")
 def daemon(config: Optional[Path] = typer.Option(None, help="Path to config TOML.")) -> None:
     """Run the PkuClaw daemon: channels, CoreRuntime, LoopManager, and MCP server."""
     try:
-        run_daemon(load_settings(config))
+        # Full daemon mode: user-facing Feishu, scheduled loops, and daemon MCP.
+        run_runtime(load_settings(config), enable_loop=True, enable_mcp=True)
     except Exception as exc:
         raise click.ClickException(str(exc)) from exc
 
@@ -31,6 +31,8 @@ def realtime_feishu(
 ) -> None:
     """Run only the Feishu realtime path for UI/debug work."""
     try:
-        run_feishu_realtime(load_settings(config))
+        # Realtime debug mode keeps CoreRuntime/AgentWrapper but disables
+        # autonomous loop ticks and Agent -> daemon MCP control tools.
+        run_runtime(load_settings(config), enable_loop=False, enable_mcp=False)
     except Exception as exc:
         raise click.ClickException(str(exc)) from exc

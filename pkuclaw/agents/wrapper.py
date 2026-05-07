@@ -18,7 +18,7 @@ from pkuclaw.core.models import (
 )
 from pkuclaw.core.store import RunRecord, Store
 from pkuclaw.mcp.schemas import render_tool_prompt
-from pkuclaw.runtime_config import RuntimeConfig, RuntimeConfigStore
+from pkuclaw.runtime_config import RuntimeConfigStore
 from pkuclaw.code_agents.codex import CodexAgent
 from pkuclaw.code_agents.subskills import load_skill_registry, render_subskills
 
@@ -144,7 +144,7 @@ class AgentWrapper:
         # inside RuntimeConfigStore rather than failing the whole daemon.
         runtime = self.runtime_config.read_snapshot()
         agent_settings = merge_agent_settings(
-            _settings_from_runtime(runtime),
+            runtime.agent,
             conversation.agent_settings,
         )
         provider = agent_settings.provider or "codex"
@@ -329,11 +329,6 @@ You are an agent invoked by PkuClaw Daemon through AgentWrapper.
         if provider == "codex":
             return self._codex
         raise RuntimeError(f"unsupported agent provider: {provider}")
-
-
-def _settings_from_runtime(runtime: RuntimeConfig) -> AgentSettings:
-    """从 runtime snapshot 中取出 Agent 设置。"""
-    return runtime.agent
 
 
 def _run_paths(base_dir: Path, run_id: str) -> AgentRunPaths:

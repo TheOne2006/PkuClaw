@@ -1,4 +1,4 @@
-"""构建并发送飞书侧控制卡和运行详情卡。"""
+"""构建并发送飞书侧运行详情卡。"""
 from __future__ import annotations
 
 from typing import Any
@@ -12,22 +12,6 @@ from pkuclaw.core.models import merge_agent_settings
 
 from .cards import FeishuCardKitClient, FeishuCardRenderer
 from .ids import short_id
-
-
-def send_control_card(
-    *,
-    message_client: FeishuCardKitClient,
-    renderer: FeishuCardRenderer,
-    receive_id_type: str,
-    receive_id: str,
-    text: str,
-) -> None:
-    """发送一张简单控制卡，用于本地命令回复或错误提示。"""
-    message_client.send_card(
-        receive_id_type=receive_id_type,
-        receive_id=receive_id,
-        card=renderer.control_card(title="PkuClaw", body=text),
-    )
 
 
 def send_run_detail_card(

@@ -1,11 +1,5 @@
-"""Concrete agent implementations."""
+"""Concrete agent provider implementations.
 
-__all__ = ["CodexAgent"]
-
-
-def __getattr__(name: str):
-    if name == "CodexAgent":
-        from pkuclaw.code_agents.codex import CodexAgent
-
-        return CodexAgent
-    raise AttributeError(name)
+Import providers from their concrete modules, for example
+``pkuclaw.code_agents.codex.CodexAgent``.
+"""

@@ -17,7 +17,7 @@ from .cards import (
     FeishuRunCardSink,
     FeishuRunCardSinkFactory,
 )
-from .detail import send_control_card, send_run_detail_card
+from .detail import send_run_detail_card
 from .events import (
     card_action_operator_open_id,
     card_action_target,
@@ -94,13 +94,13 @@ class FeishuEventHandlers:
         )
         if dispatch.run_id is None or dispatch.plan is None:
             reply_target = dispatch.channel_target or target
-            # Local controls (mode/status/recent runs) return immediately as a
-            # control card and never consume an Agent worker.
-            send_control_card(
-                message_client=self.message_client,
-                renderer=self.card_renderer,
-                receive_id_type=reply_target.target_type,
-                receive_id=reply_target.target_id,
+            # Local controls (mode/status/recent runs) still go through
+            # CoreRuntime's outbox, so the Feishu adapter does not own a
+            # parallel send path.
+            self.core_runtime.send_channel_text(
+                channel=reply_target.channel,
+                target_type=reply_target.target_type,
+                target_id=reply_target.target_id,
                 text=dispatch.reply_text,
             )
             log.ok("local control card sent")
@@ -176,11 +176,10 @@ class FeishuEventHandlers:
             f"local={dispatch.handled_locally}"
         )
         reply_target = dispatch.channel_target or target
-        send_control_card(
-            message_client=self.message_client,
-            renderer=self.card_renderer,
-            receive_id_type=reply_target.target_type,
-            receive_id=reply_target.target_id,
+        self.core_runtime.send_channel_text(
+            channel=reply_target.channel,
+            target_type=reply_target.target_type,
+            target_id=reply_target.target_id,
             text=dispatch.reply_text,
         )
         log.ok(f"menu card sent: key={event_key}, sender={short_id(open_id)}")

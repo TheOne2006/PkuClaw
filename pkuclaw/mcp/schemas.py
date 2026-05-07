@@ -32,11 +32,6 @@ def list_tool_schemas() -> list[dict[str, Any]]:
     return [tool.as_mcp_tool() for tool in TOOL_REGISTRY]
 
 
-def tool_names() -> tuple[str, ...]:
-    """返回已注册 MCP 工具名。"""
-    return tuple(tool.name for tool in TOOL_REGISTRY)
-
-
 def render_tool_prompt() -> str:
     """Render concise agent-facing daemon MCP documentation from the registry."""
 

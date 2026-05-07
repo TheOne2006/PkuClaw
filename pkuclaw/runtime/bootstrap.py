@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 import threading
 from pathlib import Path
 
-from pkuclaw.agents import AgentWrapper
+from pkuclaw.agents.wrapper import AgentWrapper
 from pkuclaw.channels.feishu.gateway import FeishuRealtimeGateway, build_feishu_realtime_gateway
 from pkuclaw.config import Settings
 from pkuclaw.core import logging as log
@@ -39,18 +39,6 @@ class RuntimeBootstrap:
     loop_manager: LoopManager | None = None
     mcp_server: DaemonMcpServer | None = None
     threads: tuple[threading.Thread, ...] = field(default_factory=tuple)
-
-
-def run_daemon_runtime(settings: Settings) -> None:
-    """Run full daemon: Feishu + CoreRuntime + MCP + LoopManager."""
-
-    run_runtime(settings, enable_loop=True, enable_mcp=True)
-
-
-def run_feishu_realtime(settings: Settings) -> None:
-    """Run Feishu realtime channel with CoreRuntime, without MCP or LoopManager."""
-
-    run_runtime(settings, enable_loop=False, enable_mcp=False)
 
 
 def run_runtime(

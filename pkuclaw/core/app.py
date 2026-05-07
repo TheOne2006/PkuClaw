@@ -183,7 +183,10 @@ class CoreRuntime:
     def runtime_list_loops(self) -> list[dict[str, Any]]:
         """Return the current hot-loaded loop specs."""
 
-        return [_loop_config_dict(loop) for loop in self.runtime_config.list_loops()]
+        return [
+            _loop_config_dict(loop)
+            for loop in self.runtime_config.read_snapshot().loops
+        ]
 
     def add_loop(
         self,

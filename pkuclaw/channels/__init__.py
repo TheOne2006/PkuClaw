@@ -1,23 +1,5 @@
-"""Chat channel adapter contracts and implementations."""
+"""Channel adapter contracts and implementations.
 
-from pkuclaw.channels.base import (
-    ChannelAdapter,
-    ChannelEnvelope,
-    ChannelEventSinkFactory,
-    ChannelInboundMessage,
-    ChannelOutboundBackend,
-    ChannelOutboundResult,
-    ChannelOutbox,
-    ChannelTarget,
-)
-
-__all__ = [
-    "ChannelAdapter",
-    "ChannelEnvelope",
-    "ChannelEventSinkFactory",
-    "ChannelInboundMessage",
-    "ChannelOutboundBackend",
-    "ChannelOutboundResult",
-    "ChannelOutbox",
-    "ChannelTarget",
-]
+Import channel contracts from ``pkuclaw.channels.base`` and concrete adapters
+from their own packages.
+"""

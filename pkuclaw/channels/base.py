@@ -61,10 +61,6 @@ class ChannelInboundMessage:
         return context
 
 
-# Use "envelope" where a caller wants to emphasize the platform event boundary.
-ChannelEnvelope = ChannelInboundMessage
-
-
 @dataclass(frozen=True)
 class ChannelOutboundResult:
     """channel outbox 操作的统一返回对象。"""
@@ -108,11 +104,6 @@ class ChannelOutboundBackend(Protocol):
         sequence: int,
     ) -> ChannelOutboundResult:
         """Update a previously sent card."""
-
-
-# CoreRuntime owns the outbox registry; each channel contributes one backend that
-# satisfies this contract.
-ChannelOutbox = ChannelOutboundBackend
 
 
 class ChannelEventSinkFactory(Protocol):
