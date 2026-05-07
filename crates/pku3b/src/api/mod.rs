@@ -8,14 +8,13 @@ use cyper::IntoUrl;
 use itertools::Itertools;
 use scraper::Selector;
 use std::{
-    collections::{HashMap, HashSet},
-    hash::{Hash, Hasher},
+    collections::{HashMap, HashSet, VecDeque},
     str::FromStr,
     sync::Arc,
 };
 
 use crate::{
-    multipart, qs,
+    id, multipart, qs,
     utils::{with_cache, with_cache_bytes},
 };
 
@@ -69,4 +68,5 @@ impl Client {
 }
 
 pub mod blackboard;
+pub mod explore;
 pub mod portal;

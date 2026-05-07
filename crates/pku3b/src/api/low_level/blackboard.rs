@@ -116,6 +116,19 @@ impl LowLevelClient {
         Ok(dom)
     }
 
+    /// Access a Blackboard launcher/course link and return the resulting page.
+    pub async fn bb_page_by_uri_follow_redirects(&self, uri: &str) -> anyhow::Result<Html> {
+        self.page_by_uri_follow_redirects(uri).await
+    }
+
+    /// Download a Blackboard/WebDAV resource and follow redirects.
+    pub async fn bb_bytes_by_uri_follow_redirects(
+        &self,
+        uri: &str,
+    ) -> anyhow::Result<bytes::Bytes> {
+        self.bytes_by_uri_follow_redirects(uri).await
+    }
+
     /// 根据 content_id 和 course_id 获取课程内容列表页面（包含作业、公告和一些其他东西）
     pub async fn bb_course_content_page(
         &self,

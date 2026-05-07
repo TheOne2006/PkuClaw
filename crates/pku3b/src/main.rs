@@ -1,11 +1,14 @@
 extern crate directories as dirs;
 
 mod api;
+mod cache;
 mod cli;
 mod config;
 mod http;
+mod id;
 mod multipart;
 mod qs;
+mod tls;
 mod utils;
 
 use clap::Parser as _;

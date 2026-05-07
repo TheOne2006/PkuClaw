@@ -25,6 +25,7 @@ pub struct LowLevelClient {
 
 impl LowLevelClient {
     pub fn new() -> Self {
+        crate::tls::install_pku_tls_ca_bundle();
         let mut default_headers = http::HeaderMap::new();
         default_headers.insert(http::header::USER_AGENT, USER_AGENT.parse().unwrap());
         let http_client = cyper::Client::builder()
@@ -68,6 +69,45 @@ impl LowLevelClient {
         let rbody = res.text().await?;
         let dom = scraper::Html::parse_document(&rbody);
         Ok(dom)
+    }
+
+    /// GET a URI and follow Blackboard-style 3xx redirects, returning HTML.
+    pub async fn page_by_uri_follow_redirects(&self, uri: &str) -> anyhow::Result<Html> {
+        let mut current = uri.to_owned();
+        let mut res = self.get_by_uri(&current).await?;
+        for _ in 0..8 {
+            if !res.status().is_redirection() {
+                break;
+            }
+            current = extract_redirect_url(&res)?.to_owned();
+            res = self.get_by_uri(&current).await?;
+        }
+        anyhow::ensure!(
+            res.status().is_success(),
+            "status not success: {}",
+            res.status()
+        );
+        let rbody = res.text().await?;
+        Ok(scraper::Html::parse_document(&rbody))
+    }
+
+    /// GET a URI and follow Blackboard-style 3xx redirects, returning bytes.
+    pub async fn bytes_by_uri_follow_redirects(&self, uri: &str) -> anyhow::Result<bytes::Bytes> {
+        let mut current = uri.to_owned();
+        let mut res = self.get_by_uri(&current).await?;
+        for _ in 0..8 {
+            if !res.status().is_redirection() {
+                break;
+            }
+            current = extract_redirect_url(&res)?.to_owned();
+            res = self.get_by_uri(&current).await?;
+        }
+        anyhow::ensure!(
+            res.status().is_success(),
+            "status not success: {}",
+            res.status()
+        );
+        Ok(res.bytes().await?)
     }
 }
 

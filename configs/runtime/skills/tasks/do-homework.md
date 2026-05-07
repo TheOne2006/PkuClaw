@@ -168,7 +168,9 @@ AskUserQuestion({
 3. 最终文件已通过本地预览/编译检查；
 4. 不需要把账号、密码、OTP 写入脚本或日志。
 
-如果需要通过教学网 CLI 提交，先确认 pku3b 已完成 `auth login`，再按 `pku3b/usage.md` 的高风险规则使用 `pku3b assignments submit --id <assignment_id> --file <path>`；不要在 loop 或未确认场景中自动提交。
+如果需要查询教学网作业状态，先用 `pku3b assignments list --term current`；对具体作业用 `pku3b assignments get --id <assignment_id> --term current` 查看 attempts、成绩/反馈和已提交附件 ID。若需要取回自己已提交的文件，必须由用户明确要求后使用 `pku3b assignments download-submission --id <submitted_file_id> --out-dir <dir>`；不要在 loop 或未确认场景中自动下载大附件。
+
+如果需要通过教学网 CLI 提交，先确认 pku3b 已完成 `auth login`，再按 `pku3b/usage.md` 的高风险规则使用 `pku3b assignments submit --id <assignment_id> --file <path>`；不要在 loop 或未确认场景中自动提交。提交后可再用 `pku3b assignments get --id <assignment_id> --term current` 验证最新提交状态、attempt 和附件列表。
 
 ## 输出
 
