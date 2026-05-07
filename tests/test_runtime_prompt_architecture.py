@@ -15,7 +15,6 @@ from pkuclaw.config import (
     CodexConfig,
     FeishuConfig,
     McpConfig,
-    MonitorConfig,
     Settings,
 )
 from pkuclaw.core.models import AgentRunRequest, AgentSettings, TaskPlan
@@ -52,13 +51,6 @@ def _settings(data_dir: Path, runtime_dir: Path) -> Settings:
             model="gpt-test",
             timeout_seconds=60,
             max_concurrent_runs=1,
-        ),
-        monitor=MonitorConfig(
-            scan_interval_seconds=60,
-            enable_assignments=True,
-            enable_announcements=True,
-            enable_replays=True,
-            enable_grades=False,
         ),
         mcp=McpConfig(host="127.0.0.1", port=8765),
     )
@@ -208,7 +200,7 @@ class PromptArchitectureTests(unittest.TestCase):
 
 
 class CodexCommandConfigTests(unittest.TestCase):
-    def test_loop_mcp_tool_approval_mode_uses_server_scoped_approve(self) -> None:
+    def test_loop_mcp_tool_approval_mode_uses_server_scoped_auto(self) -> None:
         with tempfile.TemporaryDirectory() as raw_tmp:
             settings = _settings(Path(raw_tmp) / "data", ROOT / "configs" / "runtime")
             agent = CodexAgent(settings=settings, repo_root=ROOT)
@@ -224,7 +216,7 @@ class CodexCommandConfigTests(unittest.TestCase):
         command_text = "\n".join(command)
         self.assertIn('approvals_reviewer="auto_review"', command)
         self.assertIn(
-            'mcp_servers.pkuclaw_daemon.default_tools_approval_mode="approve"',
+            'mcp_servers.pkuclaw_daemon.default_tools_approval_mode="auto"',
             command,
         )
         self.assertNotIn('default_tools_approval_mode="auto_review"', command_text)

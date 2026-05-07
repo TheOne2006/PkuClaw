@@ -23,7 +23,7 @@ from pkuclaw.core.models import (
 
 
 CODEX_APPROVAL_REVIEWER = "auto_review"
-CODEX_MCP_DEFAULT_TOOLS_APPROVAL_MODE = "approve"
+CODEX_MCP_DEFAULT_TOOLS_APPROVAL_MODE = "auto"
 
 
 class CodexAgent:
