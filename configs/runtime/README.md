@@ -10,9 +10,10 @@ configs/runtime/
   prompts.json          # hot-loaded realtime/loop prompt templates
   skills.json           # skill catalog metadata and dependency graph
   skills/               # runtime skill markdown files
-    runtime/
-    tasks/
-    tools/
+    runtime/            # PkuClaw runtime/config/skill authoring rules
+    pku3b/              # pku3b install and usage docs
+    tasks/              # user-facing study/course tasks
+    tools/              # shared non-pku3b helpers
 ```
 
 ## Run sources

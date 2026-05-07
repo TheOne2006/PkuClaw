@@ -34,6 +34,10 @@ configs/runtime/
   prompts.json          # realtime/loop prompt 模板
   skills.json           # Skill Catalog source of truth
   skills/               # skill markdown 文件
+    runtime/            # runtime/config/skill 编写规范
+    pku3b/              # pku3b 安装和使用说明
+    tasks/              # 课程/学习任务
+    tools/              # 非 pku3b 通用辅助能力
 ```
 
 如果 Agent 需要查看或修改 runtime，应直接读写这些文件，而不是调用 MCP runtime 管理工具。

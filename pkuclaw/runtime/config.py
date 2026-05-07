@@ -24,6 +24,39 @@ from pkuclaw.core.models import (
 RUNTIME_CONFIG_FILE = "runtime.json"
 RUNTIME_BACKUP_DIR = "backups"
 SUPPORTED_SCHEMA_VERSION = 1
+DEFAULT_NOTIFY_POLICY = "important_only"
+SUPPORTED_NOTIFY_POLICIES = (
+    "important_only",
+    "always",
+    "silent",
+    "on_error",
+    "digest",
+)
+_NOTIFY_POLICY_DESCRIPTIONS = {
+    "important_only": (
+        "只在重要变化或需要用户处理时通知；重要变化包括新增/变更 DDL、"
+        "24 小时内到期事项、逾期/失败风险、重要公告、登录失效、"
+        "工具缺失或连续抓取失败。没有重要变化时保持静默，只更新本地快照/摘要。"
+    ),
+    "always": (
+        "每次 loop 完成都发送简洁通知。即使没有变化，也发送低噪声状态摘要；"
+        "如果有重要变化，把重要变化置顶并给出建议动作。"
+    ),
+    "silent": (
+        "完全静默策略。不要主动调用 channel notification tools；"
+        "只更新本地快照、摘要和最终日志。即使发现变化或错误，也不要通知用户，"
+        "除非本次 Task 明确覆盖该策略。"
+    ),
+    "on_error": (
+        "只在需要用户处理的异常状态时通知，例如登录失效、OTP/验证码阻塞、"
+        "pku3b 缺失、网络/解析失败或连续抓取失败。普通课程变化和正常完成都保持静默。"
+    ),
+    "digest": (
+        "汇总通知策略。普通变化先写入本地快照/摘要，不逐条即时通知；"
+        "在本次任务明确要求发送汇总，或发现逾期/24 小时内 DDL、登录失效等紧急事项时，"
+        "发送一条合并后的简洁摘要。"
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -53,7 +86,7 @@ class RuntimeLoopConfig:
 @dataclass(frozen=True)
 class RuntimeNotificationConfig:
     """runtime.json 中的通知策略配置。"""
-    policy: str = "important_only"
+    policy: str = DEFAULT_NOTIFY_POLICY
 
 
 @dataclass(frozen=True)
@@ -121,10 +154,18 @@ class RuntimeConfigStore:
         """校验新 loop，避免重复 id，然后走安全提交路径写入 runtime.json。"""
         if not isinstance(loop, Mapping):
             raise RuntimeError("loop must be an object")
-        normalized_loop = _loop_config_to_raw(_parse_loop(loop, index=0, seen=set()))
-        loop_id = str(normalized_loop["id"])
         with self._lock:
-            raw = _config_to_raw(self.read_snapshot())
+            snapshot = self.read_snapshot()
+            normalized_loop = _loop_config_to_raw(
+                _parse_loop(
+                    loop,
+                    index=0,
+                    seen=set(),
+                    default_notify_policy=snapshot.notifications.policy,
+                )
+            )
+            loop_id = str(normalized_loop["id"])
+            raw = _config_to_raw(snapshot)
             loops = _object_list(raw, "loops")
             if any(item.get("id") == loop_id for item in loops if isinstance(item, dict)):
                 raise RuntimeError(f"duplicate runtime loop id: {loop_id}")
@@ -287,6 +328,22 @@ _LOOP_UPDATE_KEYS = {
 }
 
 
+def normalize_notify_policy(value: str | None) -> str:
+    """Validate and normalize a runtime notification policy name."""
+    policy = (value or DEFAULT_NOTIFY_POLICY).strip().lower()
+    if policy not in SUPPORTED_NOTIFY_POLICIES:
+        supported = ", ".join(SUPPORTED_NOTIFY_POLICIES)
+        raise RuntimeError(
+            f"unsupported notify_policy: {value!r}; expected one of {supported}"
+        )
+    return policy
+
+
+def describe_notify_policy(policy: str | None) -> str:
+    """Return the prompt-facing behavior description for a notify_policy."""
+    return _NOTIFY_POLICY_DESCRIPTIONS[normalize_notify_policy(policy)]
+
+
 def _default_config(path: Path) -> RuntimeConfig:
     """根据内置默认 raw config 构造 RuntimeConfig。"""
     return _parse_config(_default_raw_config(), path=path)
@@ -314,6 +371,13 @@ def _parse_config(raw: Mapping[str, Any], *, path: Path) -> RuntimeConfig:
     agent_raw = _section(raw, "agent")
     codex_raw = _section(raw, "codex")
     notifications_raw = _section(raw, "notifications")
+    notifications = RuntimeNotificationConfig(
+        policy=_notify_policy_value(
+            notifications_raw,
+            "policy",
+            default=DEFAULT_NOTIFY_POLICY,
+        ),
+    )
     return RuntimeConfig(
         path=path,
         schema_version=schema_version,
@@ -334,10 +398,8 @@ def _parse_config(raw: Mapping[str, Any], *, path: Path) -> RuntimeConfig:
                 default=1800,
             ),
         ),
-        loops=_read_loops(raw),
-        notifications=RuntimeNotificationConfig(
-            policy=_optional_str(notifications_raw, "policy") or "important_only",
-        ),
+        loops=_read_loops(raw, default_notify_policy=notifications.policy),
+        notifications=notifications,
     )
 
 
@@ -354,7 +416,11 @@ def _schema_version(raw: Mapping[str, Any]) -> int:
     return value
 
 
-def _read_loops(raw: Mapping[str, Any]) -> tuple[RuntimeLoopConfig, ...]:
+def _read_loops(
+    raw: Mapping[str, Any],
+    *,
+    default_notify_policy: str = DEFAULT_NOTIFY_POLICY,
+) -> tuple[RuntimeLoopConfig, ...]:
     """读取 runtime loops，缺省时使用内置默认 loop。"""
     value = raw.get("loops")
     if value is None:
@@ -366,7 +432,14 @@ def _read_loops(raw: Mapping[str, Any]) -> tuple[RuntimeLoopConfig, ...]:
     for index, item in enumerate(value):
         if not isinstance(item, Mapping):
             raise RuntimeError("runtime config value loops must be an object array")
-        loops.append(_parse_loop(item, index=index, seen=seen))
+        loops.append(
+            _parse_loop(
+                item,
+                index=index,
+                seen=seen,
+                default_notify_policy=default_notify_policy,
+            )
+        )
     return tuple(loops)
 
 
@@ -375,6 +448,7 @@ def _parse_loop(
     *,
     index: int,
     seen: set[str],
+    default_notify_policy: str = DEFAULT_NOTIFY_POLICY,
 ) -> RuntimeLoopConfig:
     """解析并校验一条 runtime loop spec。"""
     loop_id = _required_str(item, "id")
@@ -407,7 +481,11 @@ def _parse_loop(
         prompt=_optional_str(item, "prompt") or "",
         skill_names=_optional_str_tuple(item, "skill_names"),
         sink_mode=_optional_str(item, "sink_mode") or "silent",
-        notify_policy=_optional_str(item, "notify_policy") or "important_only",
+        notify_policy=_notify_policy_value(
+            item,
+            "notify_policy",
+            default=default_notify_policy,
+        ),
         default_channel=default_channel,
         default_target_type=default_target_type,
         default_target_id=default_target_id,
@@ -448,7 +526,7 @@ def _default_raw_config() -> dict[str, Any]:
         },
         "loops": [_loop_config_to_raw(loop) for loop in _default_loops()],
         "notifications": {
-            "policy": "important_only",
+            "policy": DEFAULT_NOTIFY_POLICY,
         },
     }
 
@@ -544,6 +622,16 @@ def _positive_int_or_default(
     if value < 1:
         raise RuntimeError(f"runtime config value {key} must be >= 1")
     return value
+
+
+def _notify_policy_value(
+    section: Mapping[str, Any],
+    key: str,
+    *,
+    default: str,
+) -> str:
+    """读取并校验通知策略字段。"""
+    return normalize_notify_policy(_optional_str(section, key) or default)
 
 
 def _optional_bool(section: Mapping[str, Any], key: str, *, default: bool) -> bool:

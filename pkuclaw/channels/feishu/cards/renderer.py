@@ -107,14 +107,9 @@ class FeishuCardRenderer:
                 f"- Run：{run_id[:8]}\n"
                 f"- 模型：{agent_context.get('model', '默认')} · "
                 f"推理：{agent_context.get('reasoning', '默认')}\n"
-                f"- 模式：{agent_context.get('mode', '默认')}",
-                limit=700,
-                text_size=META_TEXT_SIZE,
-            ),
-            markdown_block(
-                "**调试文件**\n"
-                f"运行文件夹：{artifacts.get('run_dir', '无')}",
-                limit=900,
+                f"- 模式：{agent_context.get('mode', '默认')}\n"
+                f"- 运行文件夹：{artifacts.get('run_dir', '无')}",
+                limit=1000,
                 text_size=META_TEXT_SIZE,
                 strip_inline_code=False,
             ),

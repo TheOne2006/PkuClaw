@@ -2,20 +2,48 @@
   "schema_version": 1,
   "skills": [
     {
-      "name": "runtime/codex-subagent.md",
+      "name": "runtime/runtime-config.md",
       "dependencies": [],
       "allowed_sources": [
-        "realtime",
-        "loop"
+        "realtime"
+      ],
+      "requires_confirmation": true,
+      "description": "安全调整 PkuClaw runtime.json、events、prompts、loop 和通知策略的规范；仅在用户明确要求改 runtime 时使用。",
+      "path": "runtime/runtime-config.md"
+    },
+    {
+      "name": "runtime/skill-authoring.md",
+      "dependencies": [],
+      "allowed_sources": [
+        "realtime"
+      ],
+      "requires_confirmation": true,
+      "description": "新增、拆分或修改 runtime skills 与 skills.json catalog 的规范；仅在用户要求改 skill 时使用。",
+      "path": "runtime/skill-authoring.md"
+    },
+    {
+      "name": "pku3b/install.md",
+      "dependencies": [],
+      "allowed_sources": [
+        "realtime"
+      ],
+      "requires_confirmation": true,
+      "description": "pku3b 的安装、构建、登录初始化和环境排障；不得由 loop 自动执行。",
+      "path": "pku3b/install.md"
+    },
+    {
+      "name": "pku3b/usage.md",
+      "dependencies": [],
+      "allowed_sources": [
+        "realtime"
       ],
       "requires_confirmation": false,
-      "description": "Codex 原生 subagent 使用说明；适合并行/分工处理多门课程或多阶段任务。",
-      "path": "runtime/codex-subagent.md"
+      "description": "pku3b 常用只读命令、输出注意事项和高风险命令边界；按需供 task 参考。",
+      "path": "pku3b/usage.md"
     },
     {
       "name": "tasks/sync-notices.md",
       "dependencies": [
-        "tools/pku3b-setup.md",
         "tools/data-parser.md"
       ],
       "allowed_sources": [
@@ -23,20 +51,19 @@
         "loop"
       ],
       "requires_confirmation": false,
-      "description": "同步课程通知、作业、DDL 和教学网更新；适合询问最近课程有什么更新、这周有什么事、是否有要交内容。",
+      "description": "基于稳定课程快照/摘要同步课程通知、作业、DDL 和重要公告；默认只读快照并判断变化。",
       "path": "tasks/sync-notices.md"
     },
     {
       "name": "tasks/do-homework.md",
       "dependencies": [
-        "tools/pdf-reader.md",
-        "tools/pku3b-setup.md"
+        "tools/pdf-reader.md"
       ],
       "allowed_sources": [
         "realtime"
       ],
       "requires_confirmation": true,
-      "description": "处理作业 dry-run、下载/解析附件和解题规划；提交前必须得到用户明确确认。",
+      "description": "处理作业 dry-run、附件/PDF 解析和解题规划；提交或联网抓取前必须得到用户明确确认。",
       "path": "tasks/do-homework.md"
     },
     {
@@ -53,17 +80,6 @@
       "path": "tasks/write-notes.md"
     },
     {
-      "name": "tools/pku3b-setup.md",
-      "dependencies": [],
-      "allowed_sources": [
-        "realtime",
-        "loop"
-      ],
-      "requires_confirmation": false,
-      "description": "配置并使用 pku3b CLI 访问 PKU 教学网数据的工具说明。",
-      "path": "tools/pku3b-setup.md"
-    },
-    {
       "name": "tools/data-parser.md",
       "dependencies": [],
       "allowed_sources": [
@@ -71,7 +87,7 @@
         "loop"
       ],
       "requires_confirmation": false,
-      "description": "解析结构化/半结构化课程数据、通知、作业和 DDL 的工具说明。",
+      "description": "解析、归一化和比较课程快照、作业、公告与 DDL 风险。",
       "path": "tools/data-parser.md"
     },
     {

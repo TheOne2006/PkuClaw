@@ -24,9 +24,10 @@ configs/runtime/
   prompts.json
   skills.json
   skills/
-    runtime/
-    tasks/
-    tools/
+    runtime/            # runtime/config/skill authoring rules
+    pku3b/              # pku3b install and usage docs
+    tasks/              # user-facing study/course tasks
+    tools/              # shared non-pku3b helpers
 ```
 
 Agents read or edit these files directly when needed. The runtime configuration is not managed through MCP read/write tools.

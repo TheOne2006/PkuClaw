@@ -19,7 +19,12 @@ from pkuclaw.core.models import (
 )
 from pkuclaw.core.store import RunRecord, Store
 from pkuclaw.mcp.schemas import render_tool_prompt
-from pkuclaw.runtime.config import RuntimeConfigStore
+from pkuclaw.runtime.config import (
+    DEFAULT_NOTIFY_POLICY,
+    RuntimeConfigStore,
+    describe_notify_policy,
+    normalize_notify_policy,
+)
 from pkuclaw.runtime.prompts import read_prompt_templates, render_prompt_template
 from pkuclaw.agents.providers.codex import CodexAgent
 from pkuclaw.runtime.skills import (
@@ -178,6 +183,10 @@ class AgentWrapper:
             source=request.source,
         )
         warnings = (*runtime.warnings, *skill_registry.warnings)
+        notify_policy = _notify_policy_from_context(
+            request.channel_context,
+            default=runtime.notifications.policy,
+        )
         return AgentRunContext(
             run=run,
             request=request,
@@ -191,7 +200,11 @@ class AgentWrapper:
             skill_catalog_text=skill_catalog_text,
             rendered_skills=suggested_skills_text,
             prompt_fragments="",
-            mcp_tools_text=render_tool_prompt() if request.source == "loop" else "",
+            mcp_tools_text=(
+                render_tool_prompt(notify_policy=notify_policy)
+                if request.source == "loop"
+                else ""
+            ),
             warnings=warnings,
         )
 
@@ -230,13 +243,18 @@ class AgentWrapper:
 
         templates = read_prompt_templates(self.runtime_config.config_dir)
         channel_context = context.request.channel_context
+        notify_policy = _notify_policy_from_context(
+            channel_context,
+            default=context.runtime.notifications.policy,
+        )
         return render_prompt_template(
             templates.loop.template,
             {
                 "loop_id": channel_context.get("loop_id") or "unknown",
                 "scheduled_at": channel_context.get("scheduled_at") or "unknown",
                 "sink_mode": context.request.sink_mode,
-                "notify_policy": channel_context.get("notify_policy") or "important_only",
+                "notify_policy": notify_policy,
+                "notify_policy_description": describe_notify_policy(notify_policy),
                 "notification_target": _notification_target_text(channel_context.get("target")),
                 "channel_notification_tools": context.mcp_tools_text,
                 "skill_catalog": context.skill_catalog_text,
@@ -266,6 +284,18 @@ class AgentWrapper:
         if provider == "codex":
             return self._codex
         raise RuntimeError(f"unsupported agent provider: {provider}")
+
+
+def _notify_policy_from_context(
+    channel_context: dict[str, object],
+    *,
+    default: str = DEFAULT_NOTIFY_POLICY,
+) -> str:
+    """Return the validated notify_policy for a loop prompt/tool docs."""
+    raw = channel_context.get("notify_policy")
+    if isinstance(raw, str) and raw.strip():
+        return normalize_notify_policy(raw)
+    return normalize_notify_policy(default)
 
 
 def _run_paths(base_dir: Path, run_id: str) -> AgentRunPaths:

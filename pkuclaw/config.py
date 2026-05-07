@@ -60,16 +60,6 @@ class AgentConfig:
 
 
 @dataclass(frozen=True)
-class MonitorConfig:
-    """LoopManager 和旧监控开关使用的启动配置。"""
-    scan_interval_seconds: int
-    enable_assignments: bool
-    enable_announcements: bool
-    enable_replays: bool
-    enable_grades: bool
-
-
-@dataclass(frozen=True)
 class McpConfig:
     """notification MCP HTTP 服务监听配置。"""
     host: str
@@ -84,7 +74,6 @@ class Settings:
     feishu: FeishuConfig
     agent: AgentConfig
     codex: CodexConfig
-    monitor: MonitorConfig
     mcp: McpConfig
 
 
@@ -98,7 +87,6 @@ def load_settings(config_path: Path | None = None) -> Settings:
     feishu_raw = _get_section(raw, "feishu")
     agent_raw = _get_section(raw, "agent")
     codex_raw = _get_section(raw, "codex")
-    monitor_raw = _get_section(raw, "monitor")
     mcp_raw = _get_section(raw, "mcp")
 
     app = AppConfig(
@@ -132,19 +120,6 @@ def load_settings(config_path: Path | None = None) -> Settings:
             1, _read_int(codex_raw, "max_concurrent_runs", default=1)
         ),
     )
-    monitor = MonitorConfig(
-        scan_interval_seconds=max(
-            1, _read_int(monitor_raw, "scan_interval_seconds", default=900)
-        ),
-        enable_assignments=_read_bool(
-            monitor_raw, "enable_assignments", default=True
-        ),
-        enable_announcements=_read_bool(
-            monitor_raw, "enable_announcements", default=True
-        ),
-        enable_replays=_read_bool(monitor_raw, "enable_replays", default=True),
-        enable_grades=_read_bool(monitor_raw, "enable_grades", default=False),
-    )
     mcp = McpConfig(
         host=_read_str(mcp_raw, "host", default="127.0.0.1"),
         port=max(1, _read_int(mcp_raw, "port", default=8765)),
@@ -155,7 +130,6 @@ def load_settings(config_path: Path | None = None) -> Settings:
         feishu=feishu,
         agent=agent,
         codex=codex,
-        monitor=monitor,
         mcp=mcp,
     )
 
@@ -203,14 +177,6 @@ def _read_optional_str(section: dict[str, Any], key: str) -> str | None:
         raise RuntimeError(f"config value {key} must be a string")
     value = value.strip()
     return value or None
-
-
-def _read_bool(section: dict[str, Any], key: str, default: bool) -> bool:
-    """读取布尔配置项。"""
-    value = section.get(key, default)
-    if not isinstance(value, bool):
-        raise RuntimeError(f"config value {key} must be a boolean")
-    return value
 
 
 def _read_int(section: dict[str, Any], key: str, default: int) -> int:

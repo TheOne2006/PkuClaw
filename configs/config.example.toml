@@ -19,13 +19,6 @@ model = "gpt-5.5"
 timeout_seconds = 1800
 max_concurrent_runs = 1
 
-[monitor]
-scan_interval_seconds = 900
-enable_assignments = true
-enable_announcements = true
-enable_replays = true
-enable_grades = false
-
 [mcp]
 host = "127.0.0.1"
 port = 8765

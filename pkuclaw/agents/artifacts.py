@@ -94,7 +94,7 @@ def _codex_trace_line(line: str) -> str:
     label = _codex_event_label(event_type)
     command = _find_key_recursive(data, {"command"})
     if isinstance(command, str) and command.strip():
-        return f"{label}：执行命令"
+        return f"{label}：命令 {_compact_text(command, 180)}"
     text = _find_key_recursive(data, {"delta", "text", "message", "content"})
     if isinstance(text, str) and text.strip():
         return f"{label}：{_compact_text(text, 120)}"

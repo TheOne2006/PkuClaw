@@ -159,15 +159,19 @@ AskUserQuestion({
 })
 ```
 
-### 7. 提交
+### 7. 提交（默认不执行）
 
-```bash
-/tmp/pku3b a ls --all-term | grep -i "{course}"
-/tmp/pku3b a submit {assignment_id} "{pdf_path}"
-```
+提交作业是高风险操作。本 skill 默认只生成本地答案与提交前检查清单。只有同时满足以下条件才可以继续：
+
+1. 用户明确说“提交”并确认课程、作业、文件路径；
+2. 已有稳定提交工具或用户指定的提交方式；
+3. 最终文件已通过本地预览/编译检查；
+4. 不需要把账号、密码、OTP 写入脚本或日志。
+
+如果需要通过教学网 CLI 提交，先让用户进入可信终端完成登录/确认，再按 `pku3b/usage.md` 的高风险规则处理；不要在 loop 或未确认场景中自动提交。
 
 ## 输出
 
 - `{course}/作业/{assignment}_answer.md`
 - `{course}/作业/{assignment}_answer.pdf`
-- 教学网提交状态
+- 提交前检查清单；只有用户确认后才有教学网提交状态

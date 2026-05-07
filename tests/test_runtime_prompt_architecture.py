@@ -20,7 +20,11 @@ from pkuclaw.config import (
 from pkuclaw.core.models import AgentRunRequest, AgentSettings, TaskPlan
 from pkuclaw.core.store import Store
 from pkuclaw.mcp.schemas import list_tool_schemas, render_tool_prompt
-from pkuclaw.runtime.config import RuntimeConfigStore
+from pkuclaw.runtime.config import (
+    SUPPORTED_NOTIFY_POLICIES,
+    RuntimeConfigStore,
+    describe_notify_policy,
+)
 from pkuclaw.runtime.events import read_event_catalog, resolve_channel_event_id
 from pkuclaw.runtime.prompts import read_prompt_templates, render_prompt_template
 from pkuclaw.runtime.skills import load_skill_registry, resolve_subskill_names
@@ -183,6 +187,9 @@ class PromptArchitectureTests(unittest.TestCase):
             prompt = wrapper.build_run_prompt(context)
 
         self.assertIn("# PkuClaw Loop Task", prompt)
+        self.assertIn("## Notification Policy", prompt)
+        self.assertIn("只在重要变化或需要用户处理时通知", prompt)
+        self.assertIn("Active notification policy: `important_only`", prompt)
         self.assertIn("## Channel Notification Tools", prompt)
         for name in (
             "channel_send_text",
@@ -197,6 +204,19 @@ class PromptArchitectureTests(unittest.TestCase):
         self.assertNotIn("Agent Settings", prompt)
         self.assertNotIn("# 任务：同步课程通知", prompt)
         self.assertIn("configs/runtime/skills/tasks/sync-notices.md", prompt)
+
+    def test_notify_policy_descriptions_are_available_to_loop_prompts(self) -> None:
+        self.assertEqual(
+            set(SUPPORTED_NOTIFY_POLICIES),
+            {"important_only", "always", "silent", "on_error", "digest"},
+        )
+        for policy in SUPPORTED_NOTIFY_POLICIES:
+            description = describe_notify_policy(policy)
+            self.assertIn(description, render_tool_prompt(notify_policy=policy))
+        self.assertIn("每次 loop 完成都发送简洁通知", render_tool_prompt(notify_policy="always"))
+        self.assertIn("完全静默策略", render_tool_prompt(notify_policy="silent"))
+        self.assertIn("异常状态", render_tool_prompt(notify_policy="on_error"))
+        self.assertIn("汇总通知策略", render_tool_prompt(notify_policy="digest"))
 
 
 class CodexCommandConfigTests(unittest.TestCase):
@@ -257,6 +277,33 @@ class SkillCatalogTests(unittest.TestCase):
             self.assertIn("path", item)
             self.assertNotIn("intent", item)
             self.assertTrue((ROOT / "configs" / "runtime" / "skills" / item["path"]).is_file())
+
+
+class RuntimeConfigTests(unittest.TestCase):
+    def test_notify_policy_is_validated_and_loop_uses_global_default(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmp = Path(raw_tmp)
+            (tmp / "runtime.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "notifications": {"policy": "on_error"},
+                        "loops": [
+                            {
+                                "id": "errors_only",
+                                "enabled": True,
+                                "prompt": "check",
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            runtime = RuntimeConfigStore(tmp).read_snapshot()
+
+        self.assertEqual(runtime.notifications.policy, "on_error")
+        self.assertEqual(runtime.loops[0].notify_policy, "on_error")
 
 
 class RuntimeEventTests(unittest.TestCase):

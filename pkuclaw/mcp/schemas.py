@@ -4,6 +4,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from pkuclaw.runtime.config import describe_notify_policy, normalize_notify_policy
+
 
 JsonSchema = dict[str, Any]
 
@@ -33,12 +35,14 @@ def list_tool_schemas() -> list[dict[str, Any]]:
     return [tool.as_mcp_tool() for tool in TOOL_REGISTRY]
 
 
-def render_tool_prompt() -> str:
+def render_tool_prompt(*, notify_policy: str = "important_only") -> str:
     """Render concise loop-facing channel notification tool docs."""
 
+    policy = normalize_notify_policy(notify_policy)
     lines = [
-        "Use these channel notification tools only when a loop finds an important change.",
-        "Normal loop completion should stay silent.",
+        f"Active notification policy: `{policy}`",
+        describe_notify_policy(policy),
+        "Follow this policy when deciding whether to call channel notification tools.",
         "",
         "### Channel notification tools",
     ]

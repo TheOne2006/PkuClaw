@@ -15,6 +15,9 @@ from pkuclaw.core.store import utc_now
 from pkuclaw.runtime.config import RuntimeLoopConfig
 
 
+DEFAULT_LOOP_INTERVAL_SECONDS = 900
+
+
 @dataclass(frozen=True)
 class ScheduledLoopRun:
     """LoopManager 已提交到 executor 的一次 loop run。"""
@@ -92,7 +95,7 @@ class LoopManager:
         for loop in enabled_loops:
             interval = _loop_interval_seconds(
                 loop,
-                fallback=self.settings.monitor.scan_interval_seconds,
+                fallback=DEFAULT_LOOP_INTERVAL_SECONDS,
             )
             # First sighting is immediately due; later passes use monotonic time
             # so wall-clock changes do not shift scheduler cadence.
@@ -124,7 +127,7 @@ class LoopManager:
                 log.fail(f"LoopManager scheduler pass failed: error={exc}")
             next_wake = min(
                 self.next_due_by_loop.values(),
-                default=now + self.settings.monitor.scan_interval_seconds,
+                default=now + DEFAULT_LOOP_INTERVAL_SECONDS,
             )
             self.stop_event.wait(max(1, next_wake - time.monotonic()))
 
