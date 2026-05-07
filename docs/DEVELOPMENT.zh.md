@@ -106,7 +106,7 @@ Objective、通知文案、Suggested Skills 小节等，直接改 runtime 的 `p
 包含：
 
 - 后台周期任务身份；
-- loop id / scheduled_at / sink_mode / notify_policy / notification target；
+- loop id / scheduled_at / sink_mode / notification policy / notification target；
 - Objective；
 - Notification Rules；
 - Channel Notification Tools；
@@ -146,7 +146,28 @@ Realtime prompt 不注入 MCP tools。runtime status/config/loop 管理工具已
 
 ## 8. runtime.json
 
-`configs/runtime/runtime.json` 热加载。Loop 示例：
+`configs/runtime/runtime.json` 热加载。通知目标优先级：
+
+1. 当前 loop 的 `default_channel/default_target_type/default_target_id`；
+2. 全局 `notifications.default_channel/default_target_type/default_target_id`。
+
+MCP send tools 不接受 `channel`、`target_type`、`target_id` 或 `loop_id` 参数；
+Agent 只传内容，daemon 根据当前 loop 自动解析覆盖目标或全局默认目标。未配置时发送会失败并提示配置缺失。
+
+全局通知目标示例：
+
+```json
+{
+  "notifications": {
+    "policy": "important_only",
+    "default_channel": "feishu",
+    "default_target_type": "open_id",
+    "default_target_id": "ou_xxx"
+  }
+}
+```
+
+Loop 示例：
 
 ```json
 {
@@ -156,7 +177,6 @@ Realtime prompt 不注入 MCP tools。runtime status/config/loop 管理工具已
   "prompt": "检查课程状态、教学网通知和本地数据。如果没有重要变化，保持静默；如果发现重要变化，使用 channel notification tools 通知用户。",
   "skill_names": ["tasks/sync-notices.md"],
   "sink_mode": "silent",
-  "notify_policy": "important_only",
   "prevent_overlap": true
 }
 ```

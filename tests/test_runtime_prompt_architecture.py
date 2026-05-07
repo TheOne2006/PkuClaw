@@ -7,7 +7,11 @@ from pathlib import Path
 
 from pkuclaw.agents.providers.codex import CodexAgent
 from pkuclaw.agents.wrapper import AgentWrapper
-from pkuclaw.channels.base import ChannelInboundMessage, ChannelTarget
+from pkuclaw.channels.base import (
+    ChannelInboundMessage,
+    ChannelOutboundResult,
+    ChannelTarget,
+)
 from pkuclaw.core.runtime import CoreRuntime
 from pkuclaw.config import (
     AgentConfig,
@@ -20,6 +24,7 @@ from pkuclaw.config import (
 from pkuclaw.core.models import AgentRunRequest, AgentSettings, TaskPlan
 from pkuclaw.core.store import Store
 from pkuclaw.mcp.schemas import list_tool_schemas, render_tool_prompt
+from pkuclaw.mcp.handlers import DaemonMcpToolHandler
 from pkuclaw.runtime.config import (
     SUPPORTED_NOTIFY_POLICIES,
     RuntimeConfigStore,
@@ -169,7 +174,6 @@ class PromptArchitectureTests(unittest.TestCase):
                 channel_context={
                     "loop_id": "sync_notices",
                     "scheduled_at": "2026-05-07T00:00:00+00:00",
-                    "notify_policy": "important_only",
                     "target": {
                         "channel": "feishu",
                         "target_type": "chat_id",
@@ -188,8 +192,8 @@ class PromptArchitectureTests(unittest.TestCase):
 
         self.assertIn("# PkuClaw Loop Task", prompt)
         self.assertIn("## Notification Policy", prompt)
-        self.assertIn("只在重要变化或需要用户处理时通知", prompt)
-        self.assertIn("Active notification policy: `important_only`", prompt)
+        self.assertIn("每次 loop 完成都发送简洁通知", prompt)
+        self.assertEqual(prompt.count("每次 loop 完成都发送简洁通知"), 1)
         self.assertIn("## Channel Notification Tools", prompt)
         for name in (
             "channel_send_text",
@@ -212,11 +216,11 @@ class PromptArchitectureTests(unittest.TestCase):
         )
         for policy in SUPPORTED_NOTIFY_POLICIES:
             description = describe_notify_policy(policy)
-            self.assertIn(description, render_tool_prompt(notify_policy=policy))
-        self.assertIn("每次 loop 完成都发送简洁通知", render_tool_prompt(notify_policy="always"))
-        self.assertIn("完全静默策略", render_tool_prompt(notify_policy="silent"))
-        self.assertIn("异常状态", render_tool_prompt(notify_policy="on_error"))
-        self.assertIn("汇总通知策略", render_tool_prompt(notify_policy="digest"))
+            self.assertTrue(description)
+        tool_prompt = render_tool_prompt()
+        self.assertIn("configured default notification target", tool_prompt)
+        self.assertNotIn("每次 loop 完成都发送简洁通知", tool_prompt)
+        self.assertNotIn("Active notification policy", tool_prompt)
 
 
 class CodexCommandConfigTests(unittest.TestCase):
@@ -232,6 +236,14 @@ class CodexCommandConfigTests(unittest.TestCase):
                 runtime=runtime,
                 enable_mcp=True,
             )
+            loop_command = agent._build_command(  # noqa: SLF001 - command contract test
+                session_id=None,
+                result_path=Path(raw_tmp) / "result.md",
+                agent_settings=AgentSettings(),
+                runtime=runtime,
+                enable_mcp=True,
+                mcp_loop_id="test_loop",
+            )
 
         command_text = "\n".join(command)
         self.assertIn('approvals_reviewer="auto_review"', command)
@@ -240,6 +252,10 @@ class CodexCommandConfigTests(unittest.TestCase):
             command,
         )
         self.assertNotIn('default_tools_approval_mode="auto_review"', command_text)
+        self.assertIn(
+            'mcp_servers.pkuclaw_daemon.url="http://127.0.0.1:8765/mcp?loop_id=test_loop"',
+            loop_command,
+        )
 
 
 class SkillCatalogTests(unittest.TestCase):
@@ -280,14 +296,19 @@ class SkillCatalogTests(unittest.TestCase):
 
 
 class RuntimeConfigTests(unittest.TestCase):
-    def test_notify_policy_is_validated_and_loop_uses_global_default(self) -> None:
+    def test_notify_policy_is_validated_as_global_notification_config(self) -> None:
         with tempfile.TemporaryDirectory() as raw_tmp:
             tmp = Path(raw_tmp)
             (tmp / "runtime.json").write_text(
                 json.dumps(
                     {
                         "schema_version": 1,
-                        "notifications": {"policy": "on_error"},
+                        "notifications": {
+                            "policy": "on_error",
+                            "default_channel": "feishu",
+                            "default_target_type": "open_id",
+                            "default_target_id": "ou-owner",
+                        },
                         "loops": [
                             {
                                 "id": "errors_only",
@@ -303,7 +324,74 @@ class RuntimeConfigTests(unittest.TestCase):
             runtime = RuntimeConfigStore(tmp).read_snapshot()
 
         self.assertEqual(runtime.notifications.policy, "on_error")
-        self.assertEqual(runtime.loops[0].notify_policy, "on_error")
+        self.assertEqual(runtime.notifications.default_channel, "feishu")
+        self.assertEqual(runtime.notifications.default_target_type, "open_id")
+        self.assertEqual(runtime.notifications.default_target_id, "ou-owner")
+        self.assertIsNone(runtime.loops[0].default_target_id)
+
+    def test_loop_dispatch_uses_global_target_and_allows_loop_override(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmp = Path(raw_tmp)
+            runtime_dir = tmp / "runtime"
+            runtime_dir.mkdir()
+            (runtime_dir / "runtime.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "notifications": {
+                            "policy": "important_only",
+                            "default_channel": "feishu",
+                            "default_target_type": "open_id",
+                            "default_target_id": "ou-owner",
+                        },
+                        "loops": [
+                            {
+                                "id": "inherits_global",
+                                "enabled": True,
+                                "prompt": "check",
+                            },
+                            {
+                                "id": "overrides_target",
+                                "enabled": True,
+                                "prompt": "check",
+                                "default_channel": "feishu",
+                                "default_target_type": "chat_id",
+                                "default_target_id": "oc-loop",
+                            },
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            wrapper = AgentWrapper(
+                settings=_settings(tmp / "data", runtime_dir),
+                store=Store(tmp / "pkuclaw.db"),
+                runtime_config=RuntimeConfigStore(runtime_dir),
+                repo_root=ROOT,
+            )
+            core_runtime = _core_runtime(wrapper)
+            inherited = core_runtime.create_loop_run(loop_id="inherits_global")
+            overridden = core_runtime.create_loop_run(loop_id="overrides_target")
+
+        self.assertEqual(
+            inherited.agent_request.channel_context["target"],
+            {
+                "channel": "feishu",
+                "target_type": "open_id",
+                "target_id": "ou-owner",
+            },
+        )
+        self.assertEqual(inherited.agent_request.channel, "feishu")
+        self.assertEqual(
+            overridden.agent_request.channel_context["target"],
+            {
+                "channel": "feishu",
+                "target_type": "chat_id",
+                "target_id": "oc-loop",
+            },
+        )
+        self.assertEqual(overridden.agent_request.channel, "feishu")
 
 
 class RuntimeEventTests(unittest.TestCase):
@@ -378,8 +466,164 @@ class McpToolSchemaTests(unittest.TestCase):
         )
         prompt = render_tool_prompt()
         self.assertIn("channel_send_text", prompt)
+        self.assertIn("configured default notification target", prompt)
+        self.assertNotIn("target_id", prompt)
         self.assertNotIn("runtime_get_status", prompt)
         self.assertNotIn("runtime_update_loop", prompt)
+
+    def test_send_tools_use_fixed_default_target_schema(self) -> None:
+        tools = {tool["name"]: tool["inputSchema"] for tool in list_tool_schemas()}
+        self.assertEqual(tools["channel_send_text"]["required"], ["text"])
+        self.assertEqual(set(tools["channel_send_text"]["properties"]), {"text"})
+        self.assertFalse(tools["channel_send_text"]["additionalProperties"])
+        self.assertEqual(tools["channel_send_card"]["required"], ["card"])
+        self.assertEqual(set(tools["channel_send_card"]["properties"]), {"card"})
+        self.assertFalse(tools["channel_send_card"]["additionalProperties"])
+        self.assertEqual(tools["channel_send_image"]["required"], ["image_path"])
+        self.assertEqual(
+            set(tools["channel_send_image"]["properties"]),
+            {"image_path"},
+        )
+        self.assertFalse(tools["channel_send_image"]["additionalProperties"])
+
+    def test_mcp_send_text_uses_resolved_config_target(self) -> None:
+        class RecordingBackend:
+            channel = "feishu"
+
+            def __init__(self) -> None:
+                self.last_text: tuple[ChannelTarget, str] | None = None
+
+            def send_text(
+                self,
+                *,
+                target: ChannelTarget,
+                text: str,
+            ) -> ChannelOutboundResult:
+                self.last_text = (target, text)
+                return ChannelOutboundResult(
+                    ok=True,
+                    message="text sent",
+                    target=target,
+                    data={},
+                )
+
+            def send_card(
+                self,
+                *,
+                target: ChannelTarget,
+                card: dict,
+            ) -> ChannelOutboundResult:
+                return ChannelOutboundResult(ok=True, message="card sent", target=target)
+
+            def send_image(
+                self,
+                *,
+                target: ChannelTarget,
+                image_path: str,
+            ) -> ChannelOutboundResult:
+                return ChannelOutboundResult(ok=True, message="image sent", target=target)
+
+            def update_card(
+                self,
+                *,
+                card_id: str,
+                card: dict,
+                sequence: int,
+            ) -> ChannelOutboundResult:
+                return ChannelOutboundResult(ok=True, message="card updated")
+
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmp = Path(raw_tmp)
+            runtime_dir = tmp / "runtime"
+            runtime_dir.mkdir()
+            (runtime_dir / "runtime.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "notifications": {
+                            "policy": "important_only",
+                            "default_channel": "feishu",
+                            "default_target_type": "open_id",
+                            "default_target_id": "ou-owner",
+                        },
+                        "loops": [
+                            {
+                                "id": "overrides_target",
+                                "enabled": True,
+                                "prompt": "check",
+                                "default_channel": "feishu",
+                                "default_target_type": "chat_id",
+                                "default_target_id": "oc-loop",
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            wrapper = AgentWrapper(
+                settings=_settings(tmp / "data", runtime_dir),
+                store=Store(tmp / "pkuclaw.db"),
+                runtime_config=RuntimeConfigStore(runtime_dir),
+                repo_root=ROOT,
+            )
+            core_runtime = _core_runtime(wrapper)
+            backend = RecordingBackend()
+            core_runtime.register_channel_backend(backend)
+            handler = DaemonMcpToolHandler(core_runtime=core_runtime)
+
+            result = handler.call_tool("channel_send_text", {"text": "测试成功"})
+            override_result = handler.call_tool(
+                "channel_send_text",
+                {"text": "覆盖成功"},
+                loop_id="overrides_target",
+            )
+
+        self.assertTrue(result.ok)
+        self.assertTrue(override_result.ok)
+        self.assertEqual(result.data["target"]["target_type"], "open_id")
+        self.assertEqual(result.data["target"]["target_id"], "ou-owner")
+        self.assertIsNotNone(backend.last_text)
+        target, text = backend.last_text
+        self.assertEqual(text, "覆盖成功")
+        self.assertEqual(target.channel, "feishu")
+        self.assertEqual(target.target_type, "chat_id")
+        self.assertEqual(target.target_id, "oc-loop")
+
+    def test_mcp_send_text_rejects_legacy_target_arguments(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmp = Path(raw_tmp)
+            runtime_dir = tmp / "runtime"
+            runtime_dir.mkdir()
+            (runtime_dir / "runtime.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "notifications": {
+                            "policy": "important_only",
+                            "default_channel": "feishu",
+                            "default_target_type": "open_id",
+                            "default_target_id": "ou-owner",
+                        },
+                        "loops": [],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            wrapper = AgentWrapper(
+                settings=_settings(tmp / "data", runtime_dir),
+                store=Store(tmp / "pkuclaw.db"),
+                runtime_config=RuntimeConfigStore(runtime_dir),
+                repo_root=ROOT,
+            )
+            handler = DaemonMcpToolHandler(core_runtime=_core_runtime(wrapper))
+
+            with self.assertRaisesRegex(RuntimeError, "unsupported arguments"):
+                handler.call_tool(
+                    "channel_send_text",
+                    {"text": "测试成功", "target_id": "legacy"},
+                )
 
 
 if __name__ == "__main__":

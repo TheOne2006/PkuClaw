@@ -7,16 +7,16 @@ description: 基于稳定课程快照同步通知、作业、DDL 和公告
 
 核心原则：先读稳定快照，再做摘要和变化判断。不要让 Agent 在常规 loop 中直接驱动教学网登录、交互式 CLI 或 sub-agent。
 
-## 为什么不直接依赖 pku3b
+## 为什么不在 loop 中临时处理 pku3b
 
-`pku3b` 是面向人类终端的强工具，但不适合作为 loop 默认路径：
+新版 `pku3b` 已经是 raw-only JSON CLI，适合作为确定性 snapshot collector 的底层抓取工具；但常规 loop 仍不应临时处理安装、登录或凭据问题：
 
-- 登录/OTP/验证码可能需要 TTY；
-- 输出含进度条、ANSI 样式和缓存行为，解析不够稳定；
+- 登录、OTP、cookie 失效需要用户介入；
 - 网络、教学网状态和账号状态会让 loop 变得高噪声；
-- 安装、构建、登录和抓取都可能涉及凭据或系统依赖。
+- 安装、构建、登录和抓取都可能涉及凭据或系统依赖；
+- loop 的职责应是读取稳定快照、diff 和通知，而不是现场修复抓取环境。
 
-因此本 skill 默认只消费已经生成好的结构化快照。需要接入 pku3b 时，应先做一个确定性的 snapshot collector/wrapper，再让本 skill 读取 wrapper 产物。
+因此本 skill 默认只消费已经生成好的结构化快照。需要接入 live 抓取时，应先做一个确定性的 snapshot collector，调用 `pku3b assignments list`、`pku3b announcements list`、`pku3b timetable get` 等 raw JSON 命令并写出本 skill 约定的 `latest.json`。
 
 ## 默认数据源约定
 
@@ -93,10 +93,10 @@ PKU 课程快照有重要变化：
 
 ## 可选：接入 live collector
 
-只有当用户明确要求“配置/调试教学网抓取”时，才读取 `pku3b/usage.md`。理想路径不是让 Agent 每次 loop 里手动跑 pku3b，而是实现一个独立、可测试、非交互的 collector，负责：
+只有当用户明确要求“配置/调试教学网抓取”时，才读取 `pku3b/usage.md`。理想路径是实现一个独立、可测试、非交互的 collector，负责：
 
+- 调用 pku3b raw JSON 命令，例如 `assignments list`、`announcements list`、`timetable get`；
 - 统一 timeout/retry；
-- 处理登录状态和错误分类；
-- 清理 ANSI/进度条；
-- 输出上述 `latest.json`；
+- 读取 envelope 的 `ok`、`data`、`errors[*].code` 并分类；
+- 将 pku3b 的 `data` 归一化为上述 `latest.json`；
 - 不把凭据写入日志或仓库。

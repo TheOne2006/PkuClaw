@@ -4,9 +4,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from pkuclaw.runtime.config import describe_notify_policy, normalize_notify_policy
-
-
 JsonSchema = dict[str, Any]
 
 
@@ -35,16 +32,11 @@ def list_tool_schemas() -> list[dict[str, Any]]:
     return [tool.as_mcp_tool() for tool in TOOL_REGISTRY]
 
 
-def render_tool_prompt(*, notify_policy: str = "important_only") -> str:
+def render_tool_prompt() -> str:
     """Render concise loop-facing channel notification tool docs."""
 
-    policy = normalize_notify_policy(notify_policy)
     lines = [
-        f"Active notification policy: `{policy}`",
-        describe_notify_policy(policy),
-        "Follow this policy when deciding whether to call channel notification tools.",
-        "",
-        "### Channel notification tools",
+        "Do not provide target/channel fields. Send tools always use the daemon's configured default notification target.",
     ]
     for tool in TOOL_REGISTRY:
         required = _required_args(tool.input_schema)
@@ -65,53 +57,44 @@ def _required_args(schema: Mapping[str, Any]) -> tuple[str, ...]:
 TOOL_REGISTRY: tuple[ToolSchema, ...] = (
     ToolSchema(
         name="channel_send_text",
-        description="Send a concise text notification through the configured channel outbox.",
+        description=(
+            "Send a concise text notification to the daemon's configured default notification target."
+        ),
         input_schema={
             "type": "object",
             "properties": {
-                "channel": {
-                    "type": "string",
-                    "description": "Optional channel name; defaults to the MCP server channel.",
-                },
-                "target_id": {"type": "string"},
-                "target_type": {"type": "string", "default": "chat_id"},
                 "text": {"type": "string"},
             },
-            "required": ["target_id", "text"],
+            "required": ["text"],
+            "additionalProperties": False,
         },
     ),
     ToolSchema(
         name="channel_send_card",
-        description="Send a structured card notification through the configured channel outbox.",
+        description=(
+            "Send a structured card notification to the daemon's configured default notification target."
+        ),
         input_schema={
             "type": "object",
             "properties": {
-                "channel": {
-                    "type": "string",
-                    "description": "Optional channel name; defaults to the MCP server channel.",
-                },
-                "target_id": {"type": "string"},
-                "target_type": {"type": "string", "default": "chat_id"},
                 "card": {"type": "object"},
             },
-            "required": ["target_id", "card"],
+            "required": ["card"],
+            "additionalProperties": False,
         },
     ),
     ToolSchema(
         name="channel_send_image",
-        description="Send an image notification through the configured channel outbox.",
+        description=(
+            "Send an image notification to the daemon's configured default notification target."
+        ),
         input_schema={
             "type": "object",
             "properties": {
-                "channel": {
-                    "type": "string",
-                    "description": "Optional channel name; defaults to the MCP server channel.",
-                },
-                "target_id": {"type": "string"},
-                "target_type": {"type": "string", "default": "chat_id"},
                 "image_path": {"type": "string"},
             },
-            "required": ["target_id", "image_path"],
+            "required": ["image_path"],
+            "additionalProperties": False,
         },
     ),
     ToolSchema(

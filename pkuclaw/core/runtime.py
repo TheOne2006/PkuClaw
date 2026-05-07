@@ -21,7 +21,11 @@ from pkuclaw.core.models import (
     TaskPlan,
 )
 from pkuclaw.core.store import Store, utc_now
-from pkuclaw.runtime.config import RuntimeConfigStore, RuntimeLoopConfig
+from pkuclaw.runtime.config import (
+    RuntimeConfigStore,
+    RuntimeLoopConfig,
+    RuntimeNotificationConfig,
+)
 from pkuclaw.runtime.events import RuntimeEventSpec, read_event_catalog
 
 
@@ -123,6 +127,19 @@ class CoreRuntime:
             target=target,
             image_path=image_path,
         )
+
+    def resolve_notification_target(
+        self,
+        *,
+        loop_id: str | None = None,
+    ) -> dict[str, str] | None:
+        """Resolve a loop-specific target override or the global default target."""
+
+        runtime = self.runtime_config.read_snapshot()
+        if loop_id:
+            loop = _select_loop(runtime.loops, loop_id=loop_id)
+            return _loop_notification_target(loop, runtime.notifications)
+        return _notification_config_target(runtime.notifications)
 
     def update_channel_card(
         self,
@@ -233,10 +250,10 @@ class CoreRuntime:
         text = loop.prompt or "Run this configured periodic loop. Stay silent unless important."
         suggested_skills = loop.skill_names
         scheduled_at = scheduled_at or utc_now()
-        target = _loop_default_target(loop)
+        target = _loop_notification_target(loop, runtime.notifications)
         channel_context: dict[str, Any] = {
             "loop_id": loop.id,
-            "notify_policy": loop.notify_policy,
+            "notify_policy": runtime.notifications.policy,
             "sink_mode": loop.sink_mode,
             "scheduled_at": scheduled_at,
         }
@@ -252,7 +269,7 @@ class CoreRuntime:
             conversation_id=f"daemon:loop:{loop.id}",
             text=text,
             suggested_skills=plan.suggested_skills,
-            channel=loop.default_channel,
+            channel=target["channel"] if target is not None else None,
             sender_id=None,
             channel_context=channel_context,
             sink_mode=loop.sink_mode,
@@ -261,7 +278,7 @@ class CoreRuntime:
         metadata: dict[str, Any] = {
             "source": "loop",
             "loop_id": loop.id,
-            "notify_policy": loop.notify_policy,
+            "notify_policy": runtime.notifications.policy,
             "sink_mode": loop.sink_mode,
             "scheduled_at": scheduled_at,
             "suggested_skills": list(suggested_skills),
@@ -338,17 +355,38 @@ def _select_loop(
     raise RuntimeError("no enabled runtime loops")
 
 
-def _loop_default_target(loop: RuntimeLoopConfig) -> dict[str, str] | None:
-    """Convert a loop default notification target into channel context."""
+def _loop_notification_target(
+    loop: RuntimeLoopConfig,
+    notifications: RuntimeNotificationConfig,
+) -> dict[str, str] | None:
+    """Return loop-specific notification target or the global default target."""
 
-    if not (
+    if (
         loop.default_channel
         and loop.default_target_type
         and loop.default_target_id
     ):
-        return None
-    return {
-        "channel": loop.default_channel,
-        "target_type": loop.default_target_type,
-        "target_id": loop.default_target_id,
-    }
+        return {
+            "channel": loop.default_channel,
+            "target_type": loop.default_target_type,
+            "target_id": loop.default_target_id,
+        }
+    return _notification_config_target(notifications)
+
+
+def _notification_config_target(
+    notifications: RuntimeNotificationConfig,
+) -> dict[str, str] | None:
+    """Convert the global default notification target into channel context."""
+
+    if (
+        notifications.default_channel
+        and notifications.default_target_type
+        and notifications.default_target_id
+    ):
+        return {
+            "channel": notifications.default_channel,
+            "target_type": notifications.default_target_type,
+            "target_id": notifications.default_target_id,
+        }
+    return None

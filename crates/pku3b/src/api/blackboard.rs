@@ -151,6 +151,10 @@ impl CourseMeta {
         let i = s.char_indices().rfind(|(_, c)| *c == '(').unwrap().0;
         s.split_at(i).0.trim()
     }
+
+    pub fn is_current(&self) -> bool {
+        self.is_current
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -548,12 +552,6 @@ impl CourseContentStream {
                 return Box::pin(self.next_batch()).await;
             }
         }
-    }
-    pub fn num_finished(&self) -> usize {
-        self.visited_ids.len() - self.probe_ids.len()
-    }
-    pub fn len(&self) -> usize {
-        self.visited_ids.len()
     }
 }
 

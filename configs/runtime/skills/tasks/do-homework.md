@@ -168,7 +168,7 @@ AskUserQuestion({
 3. 最终文件已通过本地预览/编译检查；
 4. 不需要把账号、密码、OTP 写入脚本或日志。
 
-如果需要通过教学网 CLI 提交，先让用户进入可信终端完成登录/确认，再按 `pku3b/usage.md` 的高风险规则处理；不要在 loop 或未确认场景中自动提交。
+如果需要通过教学网 CLI 提交，先确认 pku3b 已完成 `auth login`，再按 `pku3b/usage.md` 的高风险规则使用 `pku3b assignments submit --id <assignment_id> --file <path>`；不要在 loop 或未确认场景中自动提交。
 
 ## 输出
 

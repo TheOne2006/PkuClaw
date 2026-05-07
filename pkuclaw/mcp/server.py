@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict, dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlsplit
 from typing import Any
 
 from pkuclaw.core import logging as log
@@ -35,6 +36,8 @@ class DaemonMcpServer:
 def handle_mcp_request(
     tool_handler: DaemonMcpToolHandler,
     request: dict[str, Any],
+    *,
+    loop_id: str | None = None,
 ) -> tuple[int, dict[str, Any]]:
     """Handle one HTTP JSON-RPC MCP request for tests and the HTTP adapter."""
 
@@ -69,7 +72,11 @@ def handle_mcp_request(
                 raise RuntimeError("tool name is required")
             if not isinstance(arguments, dict):
                 raise RuntimeError("tool arguments must be an object")
-            result = tool_handler.call_tool(name.strip(), arguments)
+            result = tool_handler.call_tool(
+                name.strip(),
+                arguments,
+                loop_id=loop_id,
+            )
             return _mcp_result(
                 request_id,
                 {
@@ -98,20 +105,23 @@ def _handler_factory(
         """DaemonMcpHttpHandler 相关的数据结构或运行时组件。"""
         def do_GET(self) -> None:  # noqa: N802 - stdlib API
             """执行 do GET 逻辑。"""
-            if self.path != "/health":
+            request_path = urlsplit(self.path).path
+            if request_path != "/health":
                 self._write_json(404, {"ok": False, "message": "not found"})
                 return
             self._write_json(200, {"ok": True, "message": "ok"})
 
         def do_POST(self) -> None:  # noqa: N802 - stdlib API
             """执行 do POST 逻辑。"""
-            if self.path != "/mcp":
+            split = urlsplit(self.path)
+            if split.path != "/mcp":
                 self._write_json(404, {"ok": False, "message": "not found"})
                 return
             try:
                 status, payload = handle_mcp_request(
                     tool_handler,
                     self._read_payload(),
+                    loop_id=_query_str(split.query, "loop_id"),
                 )
             except Exception as exc:
                 status, payload = _mcp_error(None, str(exc))
@@ -140,6 +150,15 @@ def _handler_factory(
             self.wfile.write(body)
 
     return DaemonMcpHttpHandler
+
+
+def _query_str(query: str, key: str) -> str | None:
+    """Read one string query value."""
+    values = parse_qs(query).get(key)
+    if not values:
+        return None
+    value = values[0].strip()
+    return value or None
 
 
 def _mcp_result(request_id: Any, result: dict[str, Any]) -> tuple[int, dict[str, Any]]:

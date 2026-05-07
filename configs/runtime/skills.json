@@ -28,7 +28,7 @@
         "realtime"
       ],
       "requires_confirmation": true,
-      "description": "pku3b 的安装、构建、登录初始化和环境排障；不得由 loop 自动执行。",
+      "description": "pku3b raw-only CLI 的安装、构建、登录和环境排障；不得由 loop 自动执行。",
       "path": "pku3b/install.md"
     },
     {
@@ -38,7 +38,7 @@
         "realtime"
       ],
       "requires_confirmation": false,
-      "description": "pku3b 常用只读命令、输出注意事项和高风险命令边界；按需供 task 参考。",
+      "description": "pku3b raw-only JSON 命令、输出 envelope 和高风险命令边界；按需供 task 参考。",
       "path": "pku3b/usage.md"
     },
     {

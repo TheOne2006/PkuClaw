@@ -20,10 +20,8 @@ from pkuclaw.core.models import (
 from pkuclaw.core.store import RunRecord, Store
 from pkuclaw.mcp.schemas import render_tool_prompt
 from pkuclaw.runtime.config import (
-    DEFAULT_NOTIFY_POLICY,
     RuntimeConfigStore,
     describe_notify_policy,
-    normalize_notify_policy,
 )
 from pkuclaw.runtime.prompts import read_prompt_templates, render_prompt_template
 from pkuclaw.agents.providers.codex import CodexAgent
@@ -183,10 +181,6 @@ class AgentWrapper:
             source=request.source,
         )
         warnings = (*runtime.warnings, *skill_registry.warnings)
-        notify_policy = _notify_policy_from_context(
-            request.channel_context,
-            default=runtime.notifications.policy,
-        )
         return AgentRunContext(
             run=run,
             request=request,
@@ -201,7 +195,7 @@ class AgentWrapper:
             rendered_skills=suggested_skills_text,
             prompt_fragments="",
             mcp_tools_text=(
-                render_tool_prompt(notify_policy=notify_policy)
+                render_tool_prompt()
                 if request.source == "loop"
                 else ""
             ),
@@ -243,10 +237,7 @@ class AgentWrapper:
 
         templates = read_prompt_templates(self.runtime_config.config_dir)
         channel_context = context.request.channel_context
-        notify_policy = _notify_policy_from_context(
-            channel_context,
-            default=context.runtime.notifications.policy,
-        )
+        notify_policy = context.runtime.notifications.policy
         return render_prompt_template(
             templates.loop.template,
             {
@@ -284,18 +275,6 @@ class AgentWrapper:
         if provider == "codex":
             return self._codex
         raise RuntimeError(f"unsupported agent provider: {provider}")
-
-
-def _notify_policy_from_context(
-    channel_context: dict[str, object],
-    *,
-    default: str = DEFAULT_NOTIFY_POLICY,
-) -> str:
-    """Return the validated notify_policy for a loop prompt/tool docs."""
-    raw = channel_context.get("notify_policy")
-    if isinstance(raw, str) and raw.strip():
-        return normalize_notify_policy(raw)
-    return normalize_notify_policy(default)
 
 
 def _run_paths(base_dir: Path, run_id: str) -> AgentRunPaths:

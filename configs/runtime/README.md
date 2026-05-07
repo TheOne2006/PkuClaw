@@ -90,3 +90,21 @@ Loop prompts expose only channel notification tools:
 - `channel_update_card`
 
 Use them only for important loop findings. Realtime prompts do not include MCP tools.
+
+Configure the shared loop notification target once under `notifications`:
+
+```json
+{
+  "notifications": {
+    "policy": "important_only",
+    "default_channel": "feishu",
+    "default_target_type": "open_id",
+    "default_target_id": "ou_xxx"
+  }
+}
+```
+
+Individual loops may set the same three target fields to override the shared
+target for that loop. MCP send tools do not accept `channel`, `target_type`,
+`target_id`, or `loop_id` arguments from the Agent; the daemon scopes each loop
+run and resolves the override automatically.

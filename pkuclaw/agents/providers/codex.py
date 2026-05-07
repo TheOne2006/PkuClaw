@@ -8,6 +8,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 from pkuclaw.agents.base import AgentRunContext
 from pkuclaw.config import Settings
@@ -83,6 +84,7 @@ class CodexAgent:
             agent_settings=agent_settings,
             runtime=context.runtime,
             enable_mcp=context.request.source == "loop",
+            mcp_loop_id=_mcp_loop_id(context),
         )
         mode = "resume" if context.conversation.agent_session_id else "new"
         log.stage(
@@ -286,6 +288,7 @@ class CodexAgent:
         agent_settings: AgentSettings,
         runtime: Any,
         enable_mcp: bool,
+        mcp_loop_id: str | None = None,
     ) -> list[str]:
         """根据是否已有 session 拼出 codex exec/resume 命令行。"""
         command = [self.settings.codex.bin, "exec"]
@@ -293,7 +296,7 @@ class CodexAgent:
             command.extend(["resume", "--json", "-o", str(result_path)])
             self._append_runtime_options(command, agent_settings)
             if enable_mcp:
-                self._append_mcp_server(command)
+                self._append_mcp_server(command, loop_id=mcp_loop_id)
             command.extend([session_id, "-"])
             return command
 
@@ -310,7 +313,7 @@ class CodexAgent:
         )
         self._append_runtime_options(command, agent_settings)
         if enable_mcp:
-            self._append_mcp_server(command)
+            self._append_mcp_server(command, loop_id=mcp_loop_id)
         command.append("-")
         return command
 
@@ -333,9 +336,16 @@ class CodexAgent:
             ]
         )
 
-    def _append_mcp_server(self, command: list[str]) -> None:
+    def _append_mcp_server(
+        self,
+        command: list[str],
+        *,
+        loop_id: str | None = None,
+    ) -> None:
         """Expose channel notification tools to loop runs."""
         url = f"http://{self.settings.mcp.host}:{self.settings.mcp.port}/mcp"
+        if loop_id:
+            url = f"{url}?{urlencode({'loop_id': loop_id})}"
         command.extend(
             [
                 "-c",
@@ -363,6 +373,17 @@ class CodexAgent:
     def _effective_timeout(self, runtime: Any) -> int:
         """合并 runtime 和启动配置后的 Codex 超时时间。"""
         return runtime.codex.timeout_seconds or self.settings.codex.timeout_seconds
+
+
+def _mcp_loop_id(context: AgentRunContext) -> str | None:
+    """Return the loop id to scope MCP notification target resolution."""
+    if context.request.source != "loop":
+        return None
+    value = context.request.channel_context.get("loop_id")
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    return value or None
 
 
 

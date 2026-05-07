@@ -89,6 +89,14 @@ Runtime status/config/loop management tools are removed from the Agent-facing MC
 - important change: use channel notification tools;
 - final loop answers are for logs/artifacts and are not user-visible.
 
+MCP send tools do not accept target/channel arguments from the Agent. The daemon
+scopes each loop run, resolves a loop-specific
+`default_channel/default_target_type/default_target_id` override first, then
+falls back to the shared
+`notifications.default_channel/default_target_type/default_target_id`. If neither
+is configured, notification sends fail clearly instead of asking the Agent to
+guess a recipient.
+
 ## 8. Repository layout
 
 ```text

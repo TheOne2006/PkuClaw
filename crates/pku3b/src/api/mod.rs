@@ -58,12 +58,15 @@ impl Client {
     pub fn download_artifact_ttl(&self) -> Option<std::time::Duration> {
         self.0.download_artifact_ttl
     }
+
+    pub async fn save_cookies(&self) -> anyhow::Result<bool> {
+        let Some(path) = &self.0.cookie_restore_path else {
+            return Ok(false);
+        };
+        self.0.http_client.save_set_cookies(path).await?;
+        Ok(true)
+    }
 }
 
 pub mod blackboard;
-#[cfg(feature = "thesislib")]
-pub mod drm_lib;
 pub mod portal;
-pub mod syllabus;
-#[cfg(feature = "thesislib")]
-pub mod thesis_lib;

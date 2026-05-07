@@ -5,18 +5,12 @@ mod cli;
 mod config;
 mod http;
 mod multipart;
-#[cfg(feature = "pdf")]
-mod pdf;
 mod qs;
-#[cfg(feature = "ttshitu")]
-mod ttshitu;
 mod utils;
-mod walkdir;
-
-use shadow_rs::shadow;
-shadow!(build);
 
 use clap::Parser as _;
+use shadow_rs::shadow;
+shadow!(build);
 
 #[compio::main]
 async fn main() {
@@ -27,16 +21,20 @@ async fn main() {
         .filter_module("html5ever::tokenizer", log::LevelFilter::Info)
         .filter_module("html5ever::tree_builder", log::LevelFilter::Error)
         .init();
-    log::debug!("logger initialized...");
 
-    let cli = cli::Cli::parse();
-
-    match cli::start(cli).await {
-        Ok(r) => r,
-        Err(e) => {
-            use utils::style::*;
-            eprintln!("{RD}{B}Error{B:#}{RD:#}: {e:#}");
-            std::process::exit(1);
+    let cli = match cli::Cli::try_parse() {
+        Ok(cli) => cli,
+        Err(err) => {
+            let error = cli::clap_error_to_error(err);
+            cli::print_error(error.clone(), false);
+            std::process::exit(cli::exit_code(&error));
         }
+    };
+    let pretty = cli.pretty();
+
+    if let Err(err) = cli::start(cli).await {
+        let error = cli::anyhow_to_error(err);
+        cli::print_error(error.clone(), pretty);
+        std::process::exit(cli::exit_code(&error));
     }
 }

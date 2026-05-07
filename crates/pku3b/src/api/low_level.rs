@@ -2,18 +2,10 @@
 
 /// 教学网 API
 pub mod blackboard;
-/// 北京大学版权保护系统
-#[cfg(feature = "thesislib")]
-pub mod drm_lib;
 /// IAAA 认证 API
 pub mod iaaa;
 /// 校内门户 API
 pub mod portal;
-/// 选课系统 API
-pub mod syllabus;
-/// 学位论文数据库
-#[cfg(feature = "thesislib")]
-pub mod thesis_lib;
 
 use anyhow::Context as _;
 use rand::Rng as _;
@@ -53,25 +45,6 @@ impl LowLevelClient {
         self.http_client.save_set_cookies(path).await
     }
 
-    #[cfg(feature = "thesislib")]
-    fn encrypt_password(pubkey: &str, password: &str) -> anyhow::Result<String> {
-        use base64::{Engine as _, engine::general_purpose};
-        use pkcs8::DecodePublicKey;
-        use rsa::{Pkcs1v15Encrypt, RsaPublicKey, rand_core::OsRng};
-
-        // JSEncrypt: setPublicKey(SPKI PEM) then encrypt(plaintext) with RSAES-PKCS1-v1_5.
-        let key = RsaPublicKey::from_public_key_pem(pubkey)
-            .map_err(|e| anyhow::anyhow!("invalid public key PEM: {e}"))?;
-
-        // PKCS#1 v1.5 encryption is randomized (non-zero padding), so ciphertext varies per call.
-        let mut rng = OsRng;
-        let ciphertext = key
-            .encrypt(&mut rng, Pkcs1v15Encrypt, password.as_bytes())
-            .map_err(|e| anyhow::anyhow!("rsa encrypt failed: {e}"))?;
-
-        Ok(general_purpose::STANDARD.encode(ciphertext))
-    }
-
     /// 利用 [`convert_uri`] 将 uri 自动补全，然后发送请求.
     pub async fn get_by_uri(&self, uri: &str) -> anyhow::Result<cyper::Response> {
         let url = convert_uri(uri)?;
@@ -95,16 +68,6 @@ impl LowLevelClient {
         let rbody = res.text().await?;
         let dom = scraper::Html::parse_document(&rbody);
         Ok(dom)
-    }
-
-    #[cfg(feature = "ttshitu")]
-    pub async fn ttshitu_recognize(
-        &self,
-        username: String,
-        password: String,
-        image_b64: String,
-    ) -> anyhow::Result<String> {
-        crate::ttshitu::recognize(&self.http_client, username, password, image_b64).await
     }
 }
 
@@ -164,7 +127,6 @@ fn extract_redirect_url(res: &cyper::Response) -> anyhow::Result<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use base64::Engine as _;
 
     #[test]
     fn test_convert_uri() {
@@ -182,27 +144,5 @@ mod tests {
         let expected = "https://example.com/path/to/resource";
         let result = convert_uri(uri).unwrap();
         assert_eq!(result, expected);
-    }
-
-    const HAR_PEM_PUBLIC_KEY: &str = r#"-----BEGIN PUBLIC KEY-----
-MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAqw9PsMk8v9ED/LiLT62I
-DnelyIA/s8blyxqNmbgXT4xtq+Y64Bd+THYPZ4dUIRuFmMvPowQm9wL27W3PEtQy
-C8VN+TzW/nPzc74fy9cRxgaSh1FXNQBqYZtltb6G5YvwBvZlYdKhE3Oo3noUD0FJ
-JC11Nmcy2/x1V2pwXHRy2DHKaWB1EEtQ9dRxuMZolZIpEwWnT4CHfwEvth83kNRp
-E8471KJEqyQqmqJt3JRerH4X4p41zQFIxCsrznAwku3b1qm0vgGLQ8t7XEiCjDX0
-m5yIJEuW5t1YcteutuJX5+5oXxe2Fo04Wkn1pO6+QoJopqHcHJD5C+7GlnPOLB1c
-DQIDAQAB
------END PUBLIC KEY-----
-"#;
-
-    #[test]
-    #[cfg(feature = "thesislib")]
-    fn encrypt_password_outputs_256b_ciphertext_base64() {
-        let enc = LowLevelClient::encrypt_password(HAR_PEM_PUBLIC_KEY, "123123123123").unwrap();
-
-        let raw = base64::engine::general_purpose::STANDARD
-            .decode(enc)
-            .unwrap();
-        assert_eq!(raw.len(), 256);
     }
 }

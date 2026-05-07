@@ -43,10 +43,41 @@ configs/runtime/
 - `prompt`
 - `skill_names`
 - `sink_mode`
-- `notify_policy`
 - `prevent_overlap`
 
 新增 loop 时必须避免重复 `id`，并优先使用已有 task skill。
+
+### 调整 loop 通知目标
+
+所有 loop 共用的默认通知目标写在 `runtime.json` 的 `notifications` section：
+
+```json
+{
+  "notifications": {
+    "policy": "important_only",
+    "default_channel": "feishu",
+    "default_target_type": "open_id",
+    "default_target_id": "ou_xxx"
+  }
+}
+```
+
+单个 loop 可以用同名字段覆盖默认目标：
+
+```json
+{
+  "loops": [
+    {
+      "id": "special_loop",
+      "default_channel": "feishu",
+      "default_target_type": "chat_id",
+      "default_target_id": "oc_xxx"
+    }
+  ]
+}
+```
+
+MCP 通知发送工具不接受 `channel`、`target_type`、`target_id` 或 `loop_id` 参数；Agent 只传消息内容，daemon 根据当前 loop 自动使用 loop 覆盖目标，否则退回 `notifications` 默认目标。目标字段要么三个都写，要么都不写。
 
 ### 调整 quick action
 

@@ -27,11 +27,6 @@ impl std::fmt::Display for BlackboardUnautherizedError {
 }
 
 impl LowLevelClient {
-    pub async fn bb_login_require_otp(&self, username: &str) -> anyhow::Result<bool> {
-        let data = self.iaaa_is_mobile_authen("blackboard", username).await?;
-        Ok(data.authen_mode == "OTP")
-    }
-
     /// 使用 OAuth login 返回的 token 登录教学网。登录状态会记录在 client cookie 中，无需返回值.
     pub async fn bb_login(
         &self,

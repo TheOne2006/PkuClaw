@@ -75,7 +75,6 @@ class RuntimeLoopConfig:
     prompt: str = ""
     skill_names: tuple[str, ...] = ()
     sink_mode: str = "silent"
-    notify_policy: str = "important_only"
     default_channel: str | None = None
     default_target_type: str | None = None
     default_target_id: str | None = None
@@ -87,6 +86,9 @@ class RuntimeLoopConfig:
 class RuntimeNotificationConfig:
     """runtime.json 中的通知策略配置。"""
     policy: str = DEFAULT_NOTIFY_POLICY
+    default_channel: str | None = None
+    default_target_type: str | None = None
+    default_target_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -161,7 +163,6 @@ class RuntimeConfigStore:
                     loop,
                     index=0,
                     seen=set(),
-                    default_notify_policy=snapshot.notifications.policy,
                 )
             )
             loop_id = str(normalized_loop["id"])
@@ -319,7 +320,6 @@ _LOOP_UPDATE_KEYS = {
     "prompt",
     "skill_names",
     "sink_mode",
-    "notify_policy",
     "default_channel",
     "default_target_type",
     "default_target_id",
@@ -377,6 +377,7 @@ def _parse_config(raw: Mapping[str, Any], *, path: Path) -> RuntimeConfig:
             "policy",
             default=DEFAULT_NOTIFY_POLICY,
         ),
+        **_default_target_values(notifications_raw, scope="runtime notifications"),
     )
     return RuntimeConfig(
         path=path,
@@ -398,7 +399,7 @@ def _parse_config(raw: Mapping[str, Any], *, path: Path) -> RuntimeConfig:
                 default=1800,
             ),
         ),
-        loops=_read_loops(raw, default_notify_policy=notifications.policy),
+        loops=_read_loops(raw),
         notifications=notifications,
     )
 
@@ -416,11 +417,7 @@ def _schema_version(raw: Mapping[str, Any]) -> int:
     return value
 
 
-def _read_loops(
-    raw: Mapping[str, Any],
-    *,
-    default_notify_policy: str = DEFAULT_NOTIFY_POLICY,
-) -> tuple[RuntimeLoopConfig, ...]:
+def _read_loops(raw: Mapping[str, Any]) -> tuple[RuntimeLoopConfig, ...]:
     """读取 runtime loops，缺省时使用内置默认 loop。"""
     value = raw.get("loops")
     if value is None:
@@ -437,7 +434,6 @@ def _read_loops(
                 item,
                 index=index,
                 seen=seen,
-                default_notify_policy=default_notify_policy,
             )
         )
     return tuple(loops)
@@ -448,7 +444,6 @@ def _parse_loop(
     *,
     index: int,
     seen: set[str],
-    default_notify_policy: str = DEFAULT_NOTIFY_POLICY,
 ) -> RuntimeLoopConfig:
     """解析并校验一条 runtime loop spec。"""
     loop_id = _required_str(item, "id")
@@ -458,19 +453,10 @@ def _parse_loop(
     interval_seconds = _optional_int(item, "interval_seconds")
     if interval_seconds is not None and interval_seconds < 1:
         raise RuntimeError("runtime config value interval_seconds must be >= 1")
-    default_channel = _optional_str(item, "default_channel")
-    default_target_type = _optional_str(item, "default_target_type")
-    default_target_id = _optional_str(item, "default_target_id")
-    target_values = (default_channel, default_target_type, default_target_id)
-    if any(value is not None for value in target_values) and not all(
-        value is not None for value in target_values
-    ):
-        # Partial targets are rejected because MCP notification tools need all
-        # three fields to address a channel destination reliably.
-        raise RuntimeError(
-            "runtime loop default target requires default_channel, "
-            "default_target_type, and default_target_id"
-        )
+    default_target = _default_target_values(
+        item,
+        scope=f"runtime loop default target ({loop_id})",
+    )
     max_concurrent_runs = _optional_int(item, "max_concurrent_runs")
     if max_concurrent_runs is not None and max_concurrent_runs < 1:
         raise RuntimeError("runtime config value max_concurrent_runs must be >= 1")
@@ -481,14 +467,9 @@ def _parse_loop(
         prompt=_optional_str(item, "prompt") or "",
         skill_names=_optional_str_tuple(item, "skill_names"),
         sink_mode=_optional_str(item, "sink_mode") or "silent",
-        notify_policy=_notify_policy_value(
-            item,
-            "notify_policy",
-            default=default_notify_policy,
-        ),
-        default_channel=default_channel,
-        default_target_type=default_target_type,
-        default_target_id=default_target_id,
+        default_channel=default_target["default_channel"],
+        default_target_type=default_target["default_target_type"],
+        default_target_id=default_target["default_target_id"],
         prevent_overlap=_optional_bool(item, "prevent_overlap", default=True),
         max_concurrent_runs=max_concurrent_runs,
     )
@@ -504,7 +485,6 @@ def _default_loops() -> tuple[RuntimeLoopConfig, ...]:
             prompt="检查课程状态、教学网通知和本地数据。如果没有重要变化，保持静默；如果发现重要变化，使用 channel notification tools 通知用户。",
             skill_names=("tasks/sync-notices.md",),
             sink_mode="silent",
-            notify_policy="important_only",
             prevent_overlap=True,
         ),
     )
@@ -527,6 +507,9 @@ def _default_raw_config() -> dict[str, Any]:
         "loops": [_loop_config_to_raw(loop) for loop in _default_loops()],
         "notifications": {
             "policy": DEFAULT_NOTIFY_POLICY,
+            "default_channel": None,
+            "default_target_type": None,
+            "default_target_id": None,
         },
     }
 
@@ -550,6 +533,9 @@ def _config_to_raw(config: RuntimeConfig) -> dict[str, Any]:
         "loops": [_loop_config_to_raw(loop) for loop in config.loops],
         "notifications": {
             "policy": config.notifications.policy,
+            "default_channel": config.notifications.default_channel,
+            "default_target_type": config.notifications.default_target_type,
+            "default_target_id": config.notifications.default_target_id,
         },
     }
 
@@ -563,7 +549,6 @@ def _loop_config_to_raw(loop: RuntimeLoopConfig) -> dict[str, Any]:
         "prompt": loop.prompt,
         "skill_names": list(loop.skill_names),
         "sink_mode": loop.sink_mode,
-        "notify_policy": loop.notify_policy,
         "default_channel": loop.default_channel,
         "default_target_type": loop.default_target_type,
         "default_target_id": loop.default_target_id,
@@ -632,6 +617,32 @@ def _notify_policy_value(
 ) -> str:
     """读取并校验通知策略字段。"""
     return normalize_notify_policy(_optional_str(section, key) or default)
+
+
+def _default_target_values(
+    section: Mapping[str, Any],
+    *,
+    scope: str,
+) -> dict[str, str | None]:
+    """读取并校验默认通知目标字段。"""
+    default_channel = _optional_str(section, "default_channel")
+    default_target_type = _optional_str(section, "default_target_type")
+    default_target_id = _optional_str(section, "default_target_id")
+    values = (default_channel, default_target_type, default_target_id)
+    if any(value is not None for value in values) and not all(
+        value is not None for value in values
+    ):
+        # Partial targets are rejected because MCP notification tools need all
+        # three fields to address a channel destination reliably.
+        raise RuntimeError(
+            f"{scope} requires default_channel, "
+            "default_target_type, and default_target_id"
+        )
+    return {
+        "default_channel": default_channel,
+        "default_target_type": default_target_type,
+        "default_target_id": default_target_id,
+    }
 
 
 def _optional_bool(section: Mapping[str, Any], key: str, *, default: bool) -> bool:

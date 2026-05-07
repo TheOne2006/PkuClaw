@@ -2,8 +2,6 @@ use super::*;
 
 pub const IAAA_IS_MOBILE_AUTHEN: &str = "https://iaaa.pku.edu.cn/iaaa/isMobileAuthen.do";
 pub const IAAA_OAUTH_LOGIN: &str = "https://iaaa.pku.edu.cn/iaaa/oauthlogin.do";
-#[cfg(feature = "thesislib")]
-pub const IAAA_PUBKEY: &str = "https://iaaa.pku.edu.cn/iaaa/getPublicKey.do";
 
 /// OAuth login error codes:
 ///
@@ -123,22 +121,5 @@ impl LowLevelClient {
         let rbody = res.text().await?;
         let data: AuthenData = serde_json::from_str(&rbody).context("fail to parse response")?;
         Ok(data)
-    }
-
-    #[cfg(feature = "thesislib")]
-    pub async fn iaaa_public_key(&self) -> anyhow::Result<String> {
-        let res = self.get_by_uri(IAAA_PUBKEY).await?;
-        anyhow::ensure!(res.status().is_success(), "error status {}", res.status());
-
-        #[derive(serde::Deserialize)]
-        struct Data {
-            success: bool,
-            key: String,
-        }
-
-        let data: Data = serde_json::from_str(&res.text().await?)?;
-        anyhow::ensure!(data.success, "get pubkey failed");
-
-        Ok(data.key)
     }
 }

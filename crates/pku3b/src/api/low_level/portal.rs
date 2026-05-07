@@ -11,11 +11,6 @@ pub const PORTAL_MY_COURSE_TABLE_INFO: &str =
     "https://portal.pku.edu.cn/publicQuery/ctrl/topic/myCourseTable/getCourseInfo.do";
 
 impl LowLevelClient {
-    pub async fn portal_login_require_otp(&self, username: &str) -> anyhow::Result<bool> {
-        let data = self.iaaa_is_mobile_authen(PORTAL_APP_ID, username).await?;
-        Ok(data.authen_mode == "OTP")
-    }
-
     /// 使用 OAuth 登录门户系统
     pub async fn portal_login(
         &self,
