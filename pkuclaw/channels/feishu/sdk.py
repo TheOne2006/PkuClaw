@@ -97,6 +97,7 @@ def build_event_handler(*, sdk: FeishuSdk, handlers: Any) -> Any:
         sdk.lark.EventDispatcherHandler.builder("", "")
         .register_p2_im_message_receive_v1(handlers.on_message)
         .register_p2_im_message_message_read_v1(lambda _data: None)
+        .register_p2_im_chat_access_event_bot_p2p_chat_entered_v1(lambda _data: None)
         .register_p2_application_bot_menu_v6(handlers.on_bot_menu)
         .register_p2_card_action_trigger(handlers.on_card_action)
         .build()

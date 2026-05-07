@@ -8,10 +8,10 @@ Only two Agent run sources exist:
 
 | source | Trigger | Behavior |
 | --- | --- | --- |
-| `realtime` | User message | Answer the user directly. No preselected skills. |
+| `realtime` | User message or configured quick action | Answer the user directly with streaming channel UI. Ordinary messages have no preselected skills; quick actions may have suggested skills. |
 | `loop` | `LoopManager` scheduled tick | Run a configured background task. Stay silent unless important. |
 
-CoreRuntime does not classify user text into task categories. A realtime message creates `source="realtime"` and `suggested_skills=()`. A loop creates `source="loop"` and uses the loop's configured `skill_names` as suggested skills.
+CoreRuntime does not classify user text into task categories. An ordinary realtime message creates `source="realtime"` and `suggested_skills=()`. A configured realtime quick action is loaded from `configs/runtime/events.json` and also creates `source="realtime"`. A loop creates `source="loop"` and uses the loop's configured `skill_names` as suggested skills.
 
 ## 2. Runtime files
 
@@ -20,6 +20,8 @@ Runtime state is exposed as editable files:
 ```text
 configs/runtime/
   runtime.json
+  events.json
+  prompts.json
   skills.json
   skills/
     runtime/
@@ -29,7 +31,13 @@ configs/runtime/
 
 Agents read or edit these files directly when needed. The runtime configuration is not managed through MCP read/write tools.
 
-## 3. Skill Catalog
+## 3. Realtime quick actions
+
+`configs/runtime/events.json` defines user-triggered quick actions. Each event has an `id`, `task`, optional `skill_names`, and display metadata. Channel adapters decide whether a platform event is UI-only, ignored/no-op, or a quick action. For quick actions they pass a clean PkuClaw `event_id` to CoreRuntime; raw platform keys may be mapped or passed through only when already equal to a configured PkuClaw id.
+
+CoreRuntime turns a configured event into a normal streaming realtime run. This preserves the two-source model: quick actions are realtime, not a third run type.
+
+## 4. Skill Catalog
 
 `configs/runtime/skills.json` is the catalog source of truth. It points at markdown files under `configs/runtime/skills/**` and contains:
 
@@ -44,18 +52,24 @@ AgentWrapper renders the catalog into prompts. Skill bodies are not injected by 
 
 If `skills.json` is missing or invalid, the daemon keeps running with an empty catalog and a warning.
 
-## 4. Prompt builders
+## 5. Prompt builders
 
 AgentWrapper branches by `source`:
 
-- `_build_realtime_prompt(context)` creates `# PkuClaw Realtime Task` with a short identity, reply rules, Skill Catalog, and User Request.
+- `_build_realtime_prompt(context)` creates `# PkuClaw Realtime Task` with a short identity, reply rules, Skill Catalog, optional Suggested Skills for configured quick actions, and User Request.
 - `_build_loop_prompt(context)` creates `# PkuClaw Loop Task` with loop id, scheduled time, sink mode, notify policy, notification target, notification rules, channel notification tools, Skill Catalog, suggested skills, and Task.
+
+The wording/templates for both prompts are not hardcoded in `AgentWrapper`.
+They are hot-read from `configs/runtime/prompts.json` on each prompt build.
+Code only provides named variables such as `skill_catalog`, `user_request`,
+`loop_id`, and `channel_notification_tools`; reusable prompt fragments such as
+the realtime suggested-skills section also live in `prompts.json`.
 
 Realtime prompts do not include run ids, source labels, provider settings, repository paths, runtime paths, recent runs, prompt fragments, MCP tools, or full skill markdown bodies.
 
 Loop prompts do not reuse realtime reply rules and do not include runtime management tools.
 
-## 5. MCP scope
+## 6. MCP scope
 
 MCP is limited to loop notifications. The exposed tools are:
 
@@ -66,7 +80,7 @@ MCP is limited to loop notifications. The exposed tools are:
 
 Runtime status/config/loop management tools are removed from the Agent-facing MCP surface.
 
-## 6. Loop behavior
+## 7. Loop behavior
 
 `LoopManager` hot-loads `configs/runtime/runtime.json`, schedules enabled loops, and asks CoreRuntime to create `source="loop"` runs. Loop prompts tell the Agent:
 
@@ -74,7 +88,7 @@ Runtime status/config/loop management tools are removed from the Agent-facing MC
 - important change: use channel notification tools;
 - final loop answers are for logs/artifacts and are not user-visible.
 
-## 7. Repository layout
+## 8. Repository layout
 
 ```text
 pkuclaw/
@@ -85,6 +99,8 @@ pkuclaw/
   runtime_config.py   # hot-loads and validates runtime.json
 configs/runtime/
   runtime.json
+  events.json
+  prompts.json
   skills.json
   skills/
 ```

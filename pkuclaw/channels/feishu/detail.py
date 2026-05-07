@@ -7,7 +7,6 @@ from pkuclaw.code_agents.artifacts import build_codex_artifact_detail
 from pkuclaw.config import Settings
 from pkuclaw.core import logging as log
 from pkuclaw.core.app import CoreRuntime
-from pkuclaw.core.control import mode_label
 from pkuclaw.core.models import merge_agent_settings
 
 from .cards import FeishuCardKitClient, FeishuCardRenderer
@@ -77,7 +76,7 @@ def agent_context(core_runtime: CoreRuntime, conversation_id: str) -> dict[str, 
     mode = settings.mode or "standard"
     return {
         "provider": settings.provider or "codex",
-        "mode": mode_label(mode),
+        "mode": mode,
         "model": settings.model or "默认",
         "reasoning": settings.reasoning_effort or "默认",
     }

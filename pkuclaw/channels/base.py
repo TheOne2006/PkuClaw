@@ -42,7 +42,7 @@ class ChannelInboundMessage:
     text: str
     sender_id: str | None = None
     target: ChannelTarget | None = None
-    event_key: str | None = None
+    event_id: str | None = None
     external_message_id: str | None = None
     raw: Any | None = None
     metadata: Mapping[str, Any] = field(default_factory=dict)
@@ -54,6 +54,8 @@ class ChannelInboundMessage:
             context["sender_id"] = self.sender_id
         if self.target is not None:
             context["target"] = self.target.as_context()
+        if self.event_id:
+            context["event_id"] = self.event_id
         if self.external_message_id:
             context["external_message_id"] = self.external_message_id
         if self.metadata:

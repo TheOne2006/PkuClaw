@@ -10,6 +10,7 @@ from pkuclaw.channels.base import ChannelInboundMessage, ChannelTarget
 from pkuclaw.config import Settings
 from pkuclaw.core import logging as log
 from pkuclaw.core.app import CoreRuntime
+from pkuclaw.runtime_events import resolve_channel_event_id
 
 from .cards import (
     FeishuCardKitClient,
@@ -92,54 +93,10 @@ class FeishuEventHandlers:
             f"run={dispatch.run_id or 'local'}, chars={len(text)}, "
             f"local={dispatch.handled_locally}"
         )
-        if dispatch.run_id is None or dispatch.plan is None:
-            reply_target = dispatch.channel_target or target
-            # Reserved local replies still go through CoreRuntime's outbox, so
-            # the Feishu adapter does not own a parallel send path.
-            self.core_runtime.send_channel_text(
-                channel=reply_target.channel,
-                target_type=reply_target.target_type,
-                target_id=reply_target.target_id,
-                text=dispatch.reply_text,
-            )
-            log.ok("local control card sent")
-            return
-        if dispatch.agent_request is None:
-            raise RuntimeError("agent request is missing for realtime run")
-        if dispatch.channel_target is None:
-            raise RuntimeError("channel target is missing for realtime run")
-
-        sink = FeishuRunCardSinkFactory(
-            client=self.message_client,
-            renderer=self.card_renderer,
-        ).create_realtime_sink(
-            target=dispatch.channel_target,
-            run_id=dispatch.run_id,
-            store=self.core_runtime.store,
-        )
-        try:
-            sink.start()
-        except Exception as exc:
-            # If the user-facing card cannot be created, mark the queued run
-            # failed before re-raising so Store state never remains "queued".
-            self.core_runtime.store.mark_run_failed(dispatch.run_id, str(exc))
-            log.fail(
-                "failed to create Feishu run card: "
-                f"run={dispatch.run_id}, error={exc}"
-            )
-            raise
-
-        self.executor.submit(
-            process_code_agent_run,
-            self.core_runtime,
-            # Per-chat lock serializes Agent runs for the same Feishu chat so
-            # streaming cards are easier to follow and resource use is bounded.
-            self.chat_locks.for_chat(dispatch.channel_target.target_id),
-            dispatch.channel_target.target_id,
-            dispatch.run_id,
-            dispatch.plan,
-            dispatch.agent_request,
-            sink,
+        self._handle_core_dispatch(
+            dispatch=dispatch,
+            fallback_target=target,
+            lock_key=target.target_id,
         )
 
     def on_bot_menu(self, data: Any) -> None:
@@ -158,6 +115,24 @@ class FeishuEventHandlers:
             target_type="open_id",
             target_id=open_id,
         )
+        event_id = resolve_channel_event_id(
+            config_dir=self.core_runtime.runtime_config.config_dir,
+            channel="feishu",
+            raw_event_id=event_key,
+        )
+        if event_id is None:
+            log.warn(
+                "Feishu menu event is not configured as a PkuClaw quick action: "
+                f"key={event_key}, sender={short_id(open_id)}"
+            )
+            self.core_runtime.send_channel_text(
+                channel=target.channel,
+                target_type=target.target_type,
+                target_id=target.target_id,
+                text="这个菜单暂未配置。",
+            )
+            return
+
         dispatch = self.core_runtime.ingest_channel_message(
             ChannelInboundMessage(
                 channel="feishu",
@@ -165,23 +140,75 @@ class FeishuEventHandlers:
                 sender_id=open_id,
                 target=target,
                 text="",
-                event_key=event_key,
+                event_id=event_id,
                 raw=data,
+                metadata={"raw_event_key": event_key},
             )
         )
         log.event(
-            "menu event received: "
-            f"sender={short_id(open_id)}, key={event_key}, "
-            f"local={dispatch.handled_locally}"
+            "menu quick action received: "
+            f"sender={short_id(open_id)}, key={event_key}, event={event_id}, "
+            f"run={dispatch.run_id or 'local'}"
         )
-        reply_target = dispatch.channel_target or target
-        self.core_runtime.send_channel_text(
-            channel=reply_target.channel,
-            target_type=reply_target.target_type,
-            target_id=reply_target.target_id,
-            text=dispatch.reply_text,
+        self._handle_core_dispatch(
+            dispatch=dispatch,
+            fallback_target=target,
+            lock_key=target.target_id,
         )
-        log.ok(f"menu card sent: key={event_key}, sender={short_id(open_id)}")
+
+    def _handle_core_dispatch(
+        self,
+        *,
+        dispatch: Any,
+        fallback_target: ChannelTarget,
+        lock_key: str,
+    ) -> None:
+        """Render a CoreRuntime dispatch through Feishu text or streaming cards."""
+
+        if dispatch.run_id is None or dispatch.plan is None:
+            reply_target = dispatch.channel_target or fallback_target
+            if dispatch.reply_text:
+                self.core_runtime.send_channel_text(
+                    channel=reply_target.channel,
+                    target_type=reply_target.target_type,
+                    target_id=reply_target.target_id,
+                    text=dispatch.reply_text,
+                )
+            log.ok("local dispatch reply sent")
+            return
+        if dispatch.agent_request is None:
+            raise RuntimeError("agent request is missing for realtime run")
+        if dispatch.channel_target is None:
+            raise RuntimeError("channel target is missing for realtime run")
+
+        sink = FeishuRunCardSinkFactory(
+            client=self.message_client,
+            renderer=self.card_renderer,
+        ).create_realtime_sink(
+            target=dispatch.channel_target,
+            run_id=dispatch.run_id,
+            store=self.core_runtime.store,
+        )
+        try:
+            sink.start()
+        except Exception as exc:
+            self.core_runtime.store.mark_run_failed(dispatch.run_id, str(exc))
+            log.fail(
+                "failed to create Feishu run card: "
+                f"run={dispatch.run_id}, error={exc}"
+            )
+            raise
+
+        self.executor.submit(
+            process_code_agent_run,
+            self.core_runtime,
+            self.chat_locks.for_chat(lock_key),
+            dispatch.channel_target.target_id,
+            dispatch.run_id,
+            dispatch.plan,
+            dispatch.agent_request,
+            sink,
+        )
 
     def on_card_action(self, data: Any) -> Any:
         """处理运行详情翻页等飞书卡片按钮回调。"""

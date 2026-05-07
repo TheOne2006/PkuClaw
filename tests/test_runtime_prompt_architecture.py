@@ -6,6 +6,8 @@ import unittest
 from pathlib import Path
 
 from pkuclaw.agents.wrapper import AgentWrapper
+from pkuclaw.channels.base import ChannelInboundMessage, ChannelTarget
+from pkuclaw.core.app import CoreRuntime
 from pkuclaw.config import (
     AgentConfig,
     AppConfig,
@@ -19,6 +21,8 @@ from pkuclaw.core.models import AgentRunRequest, TaskPlan
 from pkuclaw.core.store import Store
 from pkuclaw.mcp.schemas import list_tool_schemas, render_tool_prompt
 from pkuclaw.runtime_config import RuntimeConfigStore
+from pkuclaw.runtime_events import read_event_catalog, resolve_channel_event_id
+from pkuclaw.runtime_prompts import read_prompt_templates, render_prompt_template
 from pkuclaw.code_agents.subskills import load_skill_registry, resolve_subskill_names
 
 
@@ -59,18 +63,51 @@ def _settings(data_dir: Path, runtime_dir: Path) -> Settings:
     )
 
 
+def _wrapper(tmp: Path) -> AgentWrapper:
+    return AgentWrapper(
+        settings=_settings(tmp / "data", ROOT / "configs" / "runtime"),
+        store=Store(tmp / "pkuclaw.db"),
+        runtime_config=RuntimeConfigStore(ROOT / "configs" / "runtime"),
+        repo_root=ROOT,
+    )
+
+
+def _core_runtime(wrapper: AgentWrapper) -> CoreRuntime:
+    return CoreRuntime(
+        store=wrapper.store,
+        agent_wrapper=wrapper,
+        runtime_config=wrapper.runtime_config,
+    )
+
+
 class PromptArchitectureTests(unittest.TestCase):
-    def _wrapper(self, tmp: Path) -> AgentWrapper:
-        return AgentWrapper(
-            settings=_settings(tmp / "data", ROOT / "configs" / "runtime"),
-            store=Store(tmp / "pkuclaw.db"),
-            runtime_config=RuntimeConfigStore(ROOT / "configs" / "runtime"),
-            repo_root=ROOT,
+    def test_prompt_templates_are_runtime_files_not_wrapper_literals(self) -> None:
+        templates = read_prompt_templates(ROOT / "configs" / "runtime")
+        self.assertIn("# PkuClaw Realtime Task", templates.realtime.template)
+        self.assertIn("# PkuClaw Loop Task", templates.loop.template)
+        self.assertIn("## Suggested Skills", templates.realtime.suggested_skills_template)
+
+        rendered = render_prompt_template(
+            templates.realtime.template,
+            {
+                "skill_catalog": "- none",
+                "suggested_skills_section": "",
+                "user_request": "你好",
+            },
         )
+        self.assertIn("## User Request", rendered)
+        self.assertIn("你好", rendered)
+
+        wrapper_source = (ROOT / "pkuclaw" / "agents" / "wrapper.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("你是 PkuClaw 的实时学习/课程助手", wrapper_source)
+        self.assertNotIn("你正在执行 PkuClaw 的后台周期任务", wrapper_source)
+        self.assertNotIn("## Suggested Skills", wrapper_source)
 
     def test_realtime_prompt_is_minimal_and_has_no_mcp_tools(self) -> None:
         with tempfile.TemporaryDirectory() as raw_tmp:
-            wrapper = self._wrapper(Path(raw_tmp))
+            wrapper = _wrapper(Path(raw_tmp))
             request = AgentRunRequest(
                 source="realtime",
                 conversation_id="chat-1",
@@ -99,11 +136,12 @@ class PromptArchitectureTests(unittest.TestCase):
         self.assertNotIn(str(ROOT), prompt)
         self.assertNotIn("Recent Runs", prompt)
         self.assertNotIn("## PkuClaw Skills", prompt)
+        self.assertNotIn("## Suggested Skills", prompt)
         self.assertNotIn("# 任务：同步课程通知", prompt)
 
     def test_loop_prompt_only_lists_channel_notification_tools(self) -> None:
         with tempfile.TemporaryDirectory() as raw_tmp:
-            wrapper = self._wrapper(Path(raw_tmp))
+            wrapper = _wrapper(Path(raw_tmp))
             request = AgentRunRequest(
                 source="loop",
                 conversation_id="daemon:loop:sync_notices",
@@ -182,6 +220,64 @@ class SkillCatalogTests(unittest.TestCase):
             self.assertIn("path", item)
             self.assertNotIn("intent", item)
             self.assertTrue((ROOT / "configs" / "runtime" / "skills" / item["path"]).is_file())
+
+
+class RuntimeEventTests(unittest.TestCase):
+    def test_runtime_event_id_creates_streaming_realtime_run(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            wrapper = _wrapper(Path(raw_tmp))
+            core_runtime = _core_runtime(wrapper)
+            dispatch = core_runtime.ingest_channel_message(
+                ChannelInboundMessage(
+                    channel="feishu",
+                    conversation_id="feishu:user:ou-test",
+                    sender_id="ou-test",
+                    target=ChannelTarget(
+                        channel="feishu",
+                        target_type="open_id",
+                        target_id="ou-test",
+                    ),
+                    text="",
+                    event_id="course_updates",
+                )
+            )
+
+            self.assertIsNotNone(dispatch.run_id)
+            self.assertIsNotNone(dispatch.agent_request)
+            self.assertEqual(dispatch.agent_request.source, "realtime")
+            self.assertIn("教学网更新", dispatch.agent_request.text)
+            self.assertEqual(dispatch.agent_request.suggested_skills, ("tasks/sync-notices.md",))
+            self.assertEqual(dispatch.reply_text, "正在查看教学网更新。")
+            context = wrapper._build_context(  # noqa: SLF001 - prompt contract test
+                run=wrapper.store.get_run(str(dispatch.run_id)),
+                request=dispatch.agent_request,
+                plan=dispatch.plan,
+            )
+            prompt = wrapper.build_run_prompt(context)
+            self.assertIn("## Suggested Skills", prompt)
+            self.assertIn("configs/runtime/skills/tasks/sync-notices.md", prompt)
+
+    def test_runtime_event_catalog_supports_direct_channel_passthrough(self) -> None:
+        catalog = read_event_catalog(ROOT / "configs" / "runtime")
+        self.assertEqual(
+            catalog.resolve_channel_event_id(channel="feishu", raw_event_id="course_updates"),
+            "course_updates",
+        )
+        self.assertIsNone(
+            resolve_channel_event_id(
+                config_dir=ROOT / "configs" / "runtime",
+                channel="feishu",
+                raw_event_id="unknown_feishu_menu",
+            )
+        )
+
+    def test_events_json_contains_quick_action_tasks(self) -> None:
+        data = json.loads((ROOT / "configs" / "runtime" / "events.json").read_text())
+        self.assertIn("events", data)
+        for item in data["events"]:
+            self.assertIn("id", item)
+            self.assertIn("task", item)
+            self.assertIn("skill_names", item)
 
 
 class McpToolSchemaTests(unittest.TestCase):

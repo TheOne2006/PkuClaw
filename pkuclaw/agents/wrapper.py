@@ -20,6 +20,7 @@ from pkuclaw.core.models import (
 from pkuclaw.core.store import RunRecord, Store
 from pkuclaw.mcp.schemas import render_tool_prompt
 from pkuclaw.runtime_config import RuntimeConfigStore
+from pkuclaw.runtime_prompts import read_prompt_templates, render_prompt_template
 from pkuclaw.code_agents.codex import CodexAgent
 from pkuclaw.code_agents.subskills import (
     load_skill_registry,
@@ -204,76 +205,45 @@ class AgentWrapper:
         raise RuntimeError(f"unsupported agent run source: {context.request.source}")
 
     def _build_realtime_prompt(self, context: AgentRunContext) -> str:
-        """Build the minimal user-facing realtime prompt."""
+        """Build the realtime task prompt from runtime templates."""
 
-        return f"""# PkuClaw Realtime Task
-
-你是 PkuClaw 的实时学习/课程助手。请直接回答用户。
-
-## Rules
-
-- 用自然中文回复。
-- 不要提 run_id、prompt、artifact、卡片实现、内部调度等实现细节。
-- 如果任务需要课程、作业、DDL、PDF、笔记或工具说明，请从 Skill Catalog 选择相关 skill，并按 path 读取 skill 文件。
-- skill 目录只是分类命名空间，是否读取由你根据任务决定。
-- 未经用户明确确认，不要提交作业、修改重要配置或执行不可逆操作。
-
-## Skill Catalog
-
-{context.skill_catalog_text}
-
-## User Request
-
-{context.request.text}
-"""
+        templates = read_prompt_templates(self.runtime_config.config_dir)
+        suggested = (
+            render_prompt_template(
+                templates.realtime.suggested_skills_template,
+                {"suggested_skills": context.rendered_skills},
+            )
+            if context.rendered_skills.strip() != "- none"
+            else ""
+        )
+        return render_prompt_template(
+            templates.realtime.template,
+            {
+                "skill_catalog": context.skill_catalog_text,
+                "suggested_skills_section": suggested,
+                "user_request": context.request.text,
+            },
+        )
 
     def _build_loop_prompt(self, context: AgentRunContext) -> str:
-        """Build the silent-by-default scheduled loop prompt."""
+        """Build the scheduled loop prompt from runtime templates."""
 
+        templates = read_prompt_templates(self.runtime_config.config_dir)
         channel_context = context.request.channel_context
-        loop_id = channel_context.get("loop_id") or "unknown"
-        scheduled_at = channel_context.get("scheduled_at") or "unknown"
-        notify_policy = channel_context.get("notify_policy") or "important_only"
-        target = _notification_target_text(channel_context.get("target"))
-        return f"""# PkuClaw Loop Task
-
-你正在执行 PkuClaw 的后台周期任务。默认保持静默。
-
-## Loop
-
-- id: `{loop_id}`
-- scheduled_at: `{scheduled_at}`
-- sink_mode: `{context.request.sink_mode}`
-- notify_policy: `{notify_policy}`
-- notification_target: {target}
-
-## Objective
-
-按本 loop 的 Task 检查状态、更新必要的本地文件，并只在重要变化时通知用户。
-
-## Notification Rules
-
-- 没有重要变化：不要主动通知用户。
-- 有重要变化：使用 channel notification tools 发送简洁通知。
-- 你的最终回答不会展示给用户；需要展示给用户时只能主动调用 channel notification tools。
-- 如果有默认 notification_target，优先使用该目标。
-
-## Channel Notification Tools
-
-{context.mcp_tools_text}
-
-## Skill Catalog
-
-{context.skill_catalog_text}
-
-## Suggested Skills
-
-{context.rendered_skills}
-
-## Task
-
-{context.request.text}
-"""
+        return render_prompt_template(
+            templates.loop.template,
+            {
+                "loop_id": channel_context.get("loop_id") or "unknown",
+                "scheduled_at": channel_context.get("scheduled_at") or "unknown",
+                "sink_mode": context.request.sink_mode,
+                "notify_policy": channel_context.get("notify_policy") or "important_only",
+                "notification_target": _notification_target_text(channel_context.get("target")),
+                "channel_notification_tools": context.mcp_tools_text,
+                "skill_catalog": context.skill_catalog_text,
+                "suggested_skills": context.rendered_skills,
+                "task": context.request.text,
+            },
+        )
 
     def _effective_model_text(self, context: AgentRunContext) -> str:
         """Return the effective model name."""

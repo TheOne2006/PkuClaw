@@ -13,7 +13,6 @@ from pkuclaw.channels.base import (
     ChannelTarget,
 )
 from pkuclaw.core import logging as log
-from pkuclaw.core.control import parse_control_command
 from pkuclaw.core.models import (
     AgentEventSink,
     AgentResult,
@@ -23,6 +22,7 @@ from pkuclaw.core.models import (
 )
 from pkuclaw.core.store import Store, utc_now
 from pkuclaw.runtime_config import RuntimeConfigStore, RuntimeLoopConfig
+from pkuclaw.runtime_events import RuntimeEventSpec, read_event_catalog
 
 
 class CoreRuntime:
@@ -141,28 +141,50 @@ class CoreRuntime:
         )
 
     def ingest_channel_message(self, message: ChannelInboundMessage) -> CoreDispatch:
-        """Ingest one normalized channel message."""
+        """Ingest one normalized channel message or PkuClaw quick action event."""
 
-        command = parse_control_command(text=message.text, event_key=message.event_key)
-        if command is not None:
-            reply = self._handle_control(
-                conversation_id=message.conversation_id,
-                kind=command.kind,
-                value=command.value,
-            )
-            return CoreDispatch(
-                reply_text=reply,
-                channel_target=message.target,
-                handled_locally=True,
-            )
-        if message.event_key:
-            return CoreDispatch(
-                reply_text=f"未知控制动作：{message.event_key}",
-                channel_target=message.target,
-                handled_locally=True,
-            )
-
+        if message.event_id:
+            return self.create_realtime_event_run(message=message, event_id=message.event_id)
         return self.create_realtime_run(message=message)
+
+    def create_realtime_event_run(
+        self,
+        *,
+        message: ChannelInboundMessage,
+        event_id: str,
+    ) -> CoreDispatch:
+        """Create a streaming realtime Agent run from a configured quick action."""
+
+        catalog = read_event_catalog(self.runtime_config.config_dir)
+        for warning in catalog.warnings:
+            log.warn(warning)
+        event = catalog.spec_for(event_id)
+        if event is None:
+            return CoreDispatch(
+                reply_text=f"未知快捷动作：{event_id}",
+                channel_target=message.target,
+                handled_locally=True,
+            )
+        normalized = ChannelInboundMessage(
+            channel=message.channel,
+            conversation_id=message.conversation_id,
+            text=event.task,
+            sender_id=message.sender_id,
+            target=message.target,
+            event_id=event.id,
+            external_message_id=message.external_message_id,
+            raw=message.raw,
+            metadata={
+                **dict(message.metadata),
+                "trigger": "runtime_event",
+                "event_id": event.id,
+                "event_title": event.title,
+            },
+        )
+        return self.create_realtime_run(
+            message=normalized,
+            plan=_event_realtime_plan(event),
+        )
 
     def create_realtime_run(
         self,
@@ -271,18 +293,6 @@ class CoreRuntime:
             sink=sink,
         )
 
-    def _handle_control(
-        self,
-        *,
-        conversation_id: str,
-        kind: str,
-        value: str | None,
-    ) -> str:
-        """Reserved local control-command entrypoint."""
-
-        _ = conversation_id, value
-        raise RuntimeError(f"local control command is not configured: {kind}")
-
 
 def _short_id(value: str) -> str:
     """Compact long ids for logs."""
@@ -298,6 +308,15 @@ def _default_realtime_plan() -> TaskPlan:
     return TaskPlan(
         suggested_skills=(),
         ack="收到，我交给 Code Agent 处理。",
+    )
+
+
+def _event_realtime_plan(event: RuntimeEventSpec) -> TaskPlan:
+    """Build the fixed realtime plan for a configured quick action."""
+
+    return TaskPlan(
+        suggested_skills=event.skill_names,
+        ack=event.ack,
     )
 
 

@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "events": [
+    {
+      "id": "course_updates",
+      "enabled": true,
+      "title": "查看教学网更新",
+      "description": "快速检查教学网通知、作业和 DDL，并用实时卡片流式返回摘要。",
+      "task": "查看当前教学网更新、课程通知、未完成作业和 DDL，并用简洁中文总结重要变化。不要提交作业；需要登录或配置时先说明缺少什么。",
+      "skill_names": [
+        "tasks/sync-notices.md"
+      ],
+      "ack": "正在查看教学网更新。"
+    },
+    {
+      "id": "homework_overview",
+      "enabled": true,
+      "title": "查看作业概览",
+      "description": "快速汇总当前未完成作业、附件和截止时间。",
+      "task": "查看当前未完成作业、附件和截止时间，按紧急程度简洁汇总。不要提交作业；提交或修改重要内容必须先获得用户明确确认。",
+      "skill_names": [
+        "tasks/sync-notices.md"
+      ],
+      "ack": "正在整理作业概览。"
+    },
+    {
+      "id": "weekly_deadlines",
+      "enabled": true,
+      "title": "查看本周 DDL",
+      "description": "快速查看未来一周课程 DDL 和需要处理的事项。",
+      "task": "查看未来一周课程 DDL、未完成作业和需要处理的学习事项，并给出简洁优先级建议。",
+      "skill_names": [
+        "tasks/sync-notices.md"
+      ],
+      "ack": "正在查看本周 DDL。"
+    }
+  ],
+  "channel_mappings": {
+    "feishu": {}
+  }
+}
