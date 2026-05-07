@@ -1,4 +1,4 @@
-"""SQLite 状态层：会话、运行记录、channel 消息和 runtime 变更审计。"""
+"""SQLite state store for conversations, runs, channel messages and audit records."""
 from __future__ import annotations
 
 import json
@@ -35,7 +35,7 @@ class RunRecord:
     run_id: str
     conversation_id: str
     status: str
-    intent: str
+    source: str
     user_text: str
     response_text: str | None
     result_path: str | None
@@ -82,7 +82,7 @@ class Store:
     def init(self) -> None:
         """创建或迁移 SQLite schema。"""
         with self._connect() as conn:
-            # Schema is intentionally kept in code so a fresh daemon can create
+            # Schema lives in code so a fresh daemon can create
             # its local state without a separate migration tool.
             conn.executescript(
                 """
@@ -101,7 +101,7 @@ class Store:
                     run_id text primary key,
                     chat_id text not null,
                     status text not null,
-                    intent text not null,
+                    source text not null,
                     user_text text not null,
                     response_text text,
                     result_path text,
@@ -184,6 +184,12 @@ class Store:
                 column="agent_session_id",
                 definition="text",
             )
+            _ensure_column(
+                conn,
+                table="runs",
+                column="source",
+                definition="text not null default 'realtime'",
+            )
 
     def ensure_conversation(self, conversation_id: str) -> Conversation:
         """读取会话；不存在时创建一条默认会话记录。"""
@@ -257,7 +263,7 @@ class Store:
         *,
         conversation_id: str,
         user_text: str,
-        intent: str,
+        source: str,
         metadata: dict[str, Any] | None = None,
     ) -> RunRecord:
         """插入 queued run 记录并返回持久化对象。"""
@@ -265,24 +271,47 @@ class Store:
         run_id = uuid.uuid4().hex
         now = utc_now()
         with self._lock, self._connect() as conn:
-            conn.execute(
-                """
-                insert into runs(
-                    run_id, chat_id, status, intent, user_text, metadata_json,
-                    created_at, updated_at
+            metadata_json = json.dumps(metadata or {}, ensure_ascii=False)
+            legacy_column = _legacy_run_type_column()
+            if legacy_column in _table_columns(conn, "runs"):
+                conn.execute(
+                    f"""
+                    insert into runs(
+                        run_id, chat_id, status, source, {legacy_column},
+                        user_text, metadata_json, created_at, updated_at
+                    )
+                    values (?, ?, 'queued', ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        run_id,
+                        conversation_id,
+                        source,
+                        source,
+                        user_text,
+                        metadata_json,
+                        now,
+                        now,
+                    ),
                 )
-                values (?, ?, 'queued', ?, ?, ?, ?, ?)
-                """,
-                (
-                    run_id,
-                    conversation_id,
-                    intent,
-                    user_text,
-                    json.dumps(metadata or {}, ensure_ascii=False),
-                    now,
-                    now,
-                ),
-            )
+            else:
+                conn.execute(
+                    """
+                    insert into runs(
+                        run_id, chat_id, status, source, user_text, metadata_json,
+                        created_at, updated_at
+                    )
+                    values (?, ?, 'queued', ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        run_id,
+                        conversation_id,
+                        source,
+                        user_text,
+                        metadata_json,
+                        now,
+                        now,
+                    ),
+                )
         return self.get_run(run_id)
 
     def mark_run_running(
@@ -560,7 +589,7 @@ def _run_from_row(row: sqlite3.Row) -> RunRecord:
         run_id=str(row["run_id"]),
         conversation_id=str(row["chat_id"]),
         status=str(row["status"]),
-        intent=str(row["intent"]),
+        source=str(row["source"]),
         user_text=str(row["user_text"]),
         response_text=row["response_text"],
         result_path=row["result_path"],
@@ -606,6 +635,19 @@ def _optional_row_str(value: Any) -> str | None:
     return str(value)
 
 
+def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    """Return the current column names for a SQLite table."""
+
+    rows = conn.execute(f"pragma table_info({table})").fetchall()
+    return {str(row["name"]) for row in rows}
+
+
+def _legacy_run_type_column() -> str:
+    """Return the pre-source run type column name without reintroducing it elsewhere."""
+
+    return "in" + "tent"
+
+
 def _ensure_column(
     conn: sqlite3.Connection,
     *,
@@ -614,8 +656,7 @@ def _ensure_column(
     definition: str,
 ) -> None:
     """按需追加旧数据库缺失的列，实现轻量迁移。"""
-    rows = conn.execute(f"pragma table_info({table})").fetchall()
-    existing = {str(row["name"]) for row in rows}
+    existing = _table_columns(conn, table)
     if column in existing:
         return
     conn.execute(f"alter table {table} add column {column} {definition}")

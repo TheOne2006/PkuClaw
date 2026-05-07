@@ -3,52 +3,87 @@
   "skills": [
     {
       "name": "runtime/codex-subagent.md",
-      "intent": "runtime",
       "dependencies": [],
-      "allowed_sources": ["realtime", "loop", "mcp", "manual", "system"],
-      "requires_confirmation": false
+      "allowed_sources": [
+        "realtime",
+        "loop"
+      ],
+      "requires_confirmation": false,
+      "description": "Codex 原生 subagent 使用说明；适合并行/分工处理多门课程或多阶段任务。",
+      "path": "runtime/codex-subagent.md"
     },
     {
       "name": "tasks/sync-notices.md",
-      "intent": "sync",
-      "dependencies": ["tools/pku3b-setup.md", "tools/data-parser.md"],
-      "allowed_sources": ["realtime", "loop"],
-      "requires_confirmation": false
+      "dependencies": [
+        "tools/pku3b-setup.md",
+        "tools/data-parser.md"
+      ],
+      "allowed_sources": [
+        "realtime",
+        "loop"
+      ],
+      "requires_confirmation": false,
+      "description": "同步课程通知、作业、DDL 和教学网更新；适合询问最近课程有什么更新、这周有什么事、是否有要交内容。",
+      "path": "tasks/sync-notices.md"
     },
     {
       "name": "tasks/do-homework.md",
-      "intent": "homework",
-      "dependencies": ["tools/pdf-reader.md", "tools/pku3b-setup.md"],
-      "allowed_sources": ["realtime"],
-      "requires_confirmation": true
+      "dependencies": [
+        "tools/pdf-reader.md",
+        "tools/pku3b-setup.md"
+      ],
+      "allowed_sources": [
+        "realtime"
+      ],
+      "requires_confirmation": true,
+      "description": "处理作业 dry-run、下载/解析附件和解题规划；提交前必须得到用户明确确认。",
+      "path": "tasks/do-homework.md"
     },
     {
       "name": "tasks/write-notes.md",
-      "intent": "notes",
-      "dependencies": ["tools/pdf-reader.md"],
-      "allowed_sources": ["realtime", "loop"],
-      "requires_confirmation": false
+      "dependencies": [
+        "tools/pdf-reader.md"
+      ],
+      "allowed_sources": [
+        "realtime",
+        "loop"
+      ],
+      "requires_confirmation": false,
+      "description": "根据课程材料、讲义、PDF 或已有草稿整理/续写学习笔记。",
+      "path": "tasks/write-notes.md"
     },
     {
       "name": "tools/pku3b-setup.md",
-      "intent": "tool",
       "dependencies": [],
-      "allowed_sources": ["realtime", "loop", "mcp", "manual", "system"],
-      "requires_confirmation": false
+      "allowed_sources": [
+        "realtime",
+        "loop"
+      ],
+      "requires_confirmation": false,
+      "description": "配置并使用 pku3b CLI 访问 PKU 教学网数据的工具说明。",
+      "path": "tools/pku3b-setup.md"
     },
     {
       "name": "tools/data-parser.md",
-      "intent": "tool",
       "dependencies": [],
-      "allowed_sources": ["realtime", "loop", "mcp", "manual", "system"],
-      "requires_confirmation": false
+      "allowed_sources": [
+        "realtime",
+        "loop"
+      ],
+      "requires_confirmation": false,
+      "description": "解析结构化/半结构化课程数据、通知、作业和 DDL 的工具说明。",
+      "path": "tools/data-parser.md"
     },
     {
       "name": "tools/pdf-reader.md",
-      "intent": "tool",
       "dependencies": [],
-      "allowed_sources": ["realtime", "loop", "mcp", "manual", "system"],
-      "requires_confirmation": false
+      "allowed_sources": [
+        "realtime",
+        "loop"
+      ],
+      "requires_confirmation": false,
+      "description": "读取、抽取和总结 PDF/讲义内容的工具说明。",
+      "path": "tools/pdf-reader.md"
     }
   ]
 }

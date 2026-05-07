@@ -59,7 +59,7 @@ class FeishuEventHandlers:
     chat_locks: ChatLocks = field(default_factory=ChatLocks)
 
     def on_message(self, data: Any) -> None:
-        """处理飞书文本消息，分流本地控制命令或启动 realtime Agent run。"""
+        """处理飞书文本消息，分流预留菜单/控制入口或启动 realtime Agent run。"""
         event = getattr(data, "event", None)
         message = getattr(event, "message", None)
         if message is None or getattr(message, "message_type", None) != "text":
@@ -94,9 +94,8 @@ class FeishuEventHandlers:
         )
         if dispatch.run_id is None or dispatch.plan is None:
             reply_target = dispatch.channel_target or target
-            # Local controls (mode/status/recent runs) still go through
-            # CoreRuntime's outbox, so the Feishu adapter does not own a
-            # parallel send path.
+            # Reserved local replies still go through CoreRuntime's outbox, so
+            # the Feishu adapter does not own a parallel send path.
             self.core_runtime.send_channel_text(
                 channel=reply_target.channel,
                 target_type=reply_target.target_type,

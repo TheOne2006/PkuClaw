@@ -38,6 +38,7 @@ class AgentRunContext:
     paths: AgentRunPaths
     repo_root: Path
     recent_runs_text: str
+    skill_catalog_text: str
     rendered_skills: str
     prompt_fragments: str
     mcp_tools_text: str

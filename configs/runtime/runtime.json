@@ -2,9 +2,9 @@
   "schema_version": 1,
   "agent": {
     "provider": "codex",
-    "mode": "standard",
-    "model": "",
-    "reasoning_effort": ""
+    "mode": "fixed",
+    "model": "gpt-5.5",
+    "reasoning_effort": "xhigh"
   },
   "codex": {
     "sandbox": "workspace-write",
@@ -15,7 +15,7 @@
       "id": "sync_notices",
       "enabled": true,
       "interval_seconds": 900,
-      "prompt": "检查课程状态、教学网通知和本地数据。如果没有重要变化，保持静默；如果发现重要变化，可以通过 daemon MCP channel tools 主动通知用户。",
+      "prompt": "检查课程状态、教学网通知和本地数据。如果没有重要变化，保持静默；如果发现重要变化，使用 channel notification tools 通知用户。",
       "skill_names": [
         "tasks/sync-notices.md"
       ],
@@ -24,16 +24,7 @@
       "prevent_overlap": true
     }
   ],
-  "prompt": {
-    "fragment_paths": [],
-    "default_skill_names": []
-  },
   "notifications": {
     "policy": "important_only"
-  },
-  "permissions": {
-    "agent_can_update_runtime": true,
-    "agent_can_add_loop": true,
-    "agent_can_modify_boot_config": false
   }
 }

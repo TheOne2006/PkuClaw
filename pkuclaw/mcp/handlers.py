@@ -1,4 +1,4 @@
-"""把 MCP tool call 分发到 CoreRuntime 的真实业务方法。"""
+"""Dispatch MCP channel notification tool calls to CoreRuntime."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -12,17 +12,19 @@ from pkuclaw.mcp.schemas import list_tool_schemas
 
 @dataclass
 class DaemonMcpToolHandler:
-    """Dispatch daemon MCP tool calls into CoreRuntime-owned capabilities."""
+    """Dispatch channel notification tool calls into CoreRuntime."""
 
     core_runtime: CoreRuntime
     default_channel: str = "feishu"
 
     def list_tools(self) -> list[dict[str, Any]]:
-        """返回 MCP 工具 schema 列表。"""
+        """Return MCP tool schemas."""
+
         return list_tool_schemas()
 
     def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> McpToolResult:
-        """校验 tool 参数对象，并按工具名分发到对应处理方法。"""
+        """Validate arguments and dispatch by tool name."""
+
         args = arguments or {}
         if not isinstance(args, dict):
             raise RuntimeError("tool arguments must be an object")
@@ -31,15 +33,6 @@ class DaemonMcpToolHandler:
             "channel_send_card": self._channel_send_card,
             "channel_send_image": self._channel_send_image,
             "channel_update_card": self._channel_update_card,
-            "runtime_get_status": self._runtime_get_status,
-            "runtime_get_config": self._runtime_get_config,
-            "runtime_list_loops": self._runtime_list_loops,
-            "runtime_list_recent_runs": self._runtime_list_recent_runs,
-            "runtime_get_run": self._runtime_get_run,
-            "runtime_add_loop": self._runtime_add_loop,
-            "runtime_update_loop": self._runtime_update_loop,
-            "runtime_enable_loop": self._runtime_enable_loop,
-            "runtime_disable_loop": self._runtime_disable_loop,
         }
         handler = dispatch.get(name)
         if handler is None:
@@ -47,7 +40,6 @@ class DaemonMcpToolHandler:
         return handler(args)
 
     def _channel_send_text(self, args: dict[str, Any]) -> McpToolResult:
-        """内部辅助函数，封装 channel send text 逻辑。"""
         return _as_tool_result(
             self.core_runtime.send_channel_text(
                 channel=self._channel(args),
@@ -58,19 +50,16 @@ class DaemonMcpToolHandler:
         )
 
     def _channel_send_card(self, args: dict[str, Any]) -> McpToolResult:
-        """内部辅助函数，封装 channel send card 逻辑。"""
-        card = _required_object(args, "card")
         return _as_tool_result(
             self.core_runtime.send_channel_card(
                 channel=self._channel(args),
                 target_type=_optional_str(args, "target_type") or "chat_id",
                 target_id=_required_str(args, "target_id"),
-                card=card,
+                card=_required_object(args, "card"),
             )
         )
 
     def _channel_send_image(self, args: dict[str, Any]) -> McpToolResult:
-        """内部辅助函数，封装 channel send image 逻辑。"""
         return _as_tool_result(
             self.core_runtime.send_channel_image(
                 channel=self._channel(args),
@@ -81,7 +70,6 @@ class DaemonMcpToolHandler:
         )
 
     def _channel_update_card(self, args: dict[str, Any]) -> McpToolResult:
-        """内部辅助函数，封装 channel update card 逻辑。"""
         sequence = args.get("sequence")
         if not isinstance(sequence, int):
             raise RuntimeError("sequence must be an integer")
@@ -94,113 +82,13 @@ class DaemonMcpToolHandler:
             )
         )
 
-    def _runtime_get_status(self, args: dict[str, Any]) -> McpToolResult:
-        """内部辅助函数，封装 runtime get status 逻辑。"""
-        return McpToolResult(
-            ok=True,
-            message="runtime status",
-            data=self.core_runtime.runtime_get_status(
-                conversation_id=_optional_str(args, "conversation_id"),
-            ),
-        )
-
-    def _runtime_get_config(self, args: dict[str, Any]) -> McpToolResult:
-        """内部辅助函数，封装 runtime get config 逻辑。"""
-        _reject_unexpected_args(args, allowed=())
-        return McpToolResult(
-            ok=True,
-            message="runtime config",
-            data=self.core_runtime.runtime_get_config(),
-        )
-
-    def _runtime_list_loops(self, args: dict[str, Any]) -> McpToolResult:
-        """内部辅助函数，封装 runtime list loops 逻辑。"""
-        _reject_unexpected_args(args, allowed=())
-        return McpToolResult(
-            ok=True,
-            message="runtime loops",
-            data={"loops": self.core_runtime.runtime_list_loops()},
-        )
-
-    def _runtime_list_recent_runs(self, args: dict[str, Any]) -> McpToolResult:
-        """内部辅助函数，封装 runtime list recent runs 逻辑。"""
-        return McpToolResult(
-            ok=True,
-            message="recent runs",
-            data={
-                "runs": self.core_runtime.runtime_list_recent_runs(
-                    conversation_id=_optional_str(args, "conversation_id"),
-                    limit=_optional_limit(args, "limit", default=10),
-                )
-            },
-        )
-
-    def _runtime_get_run(self, args: dict[str, Any]) -> McpToolResult:
-        """内部辅助函数，封装 runtime get run 逻辑。"""
-        return McpToolResult(
-            ok=True,
-            message="runtime run",
-            data=self.core_runtime.runtime_get_run(
-                run_id=_required_str(args, "run_id"),
-            ),
-        )
-
-    def _runtime_add_loop(self, args: dict[str, Any]) -> McpToolResult:
-        """内部辅助函数，封装 runtime add loop 逻辑。"""
-        return McpToolResult(
-            ok=True,
-            message="runtime loop added",
-            data=self.core_runtime.add_loop(
-                loop=_required_object(args, "loop"),
-                actor=_actor(args),
-                run_id=_optional_str(args, "run_id"),
-            ),
-        )
-
-    def _runtime_update_loop(self, args: dict[str, Any]) -> McpToolResult:
-        """内部辅助函数，封装 runtime update loop 逻辑。"""
-        return McpToolResult(
-            ok=True,
-            message="runtime loop updated",
-            data=self.core_runtime.update_loop(
-                loop_id=_required_str(args, "loop_id"),
-                updates=_required_object(args, "updates"),
-                actor=_actor(args),
-                run_id=_optional_str(args, "run_id"),
-            ),
-        )
-
-    def _runtime_enable_loop(self, args: dict[str, Any]) -> McpToolResult:
-        """内部辅助函数，封装 runtime enable loop 逻辑。"""
-        return McpToolResult(
-            ok=True,
-            message="runtime loop enabled",
-            data=self.core_runtime.enable_loop(
-                loop_id=_required_str(args, "loop_id"),
-                actor=_actor(args),
-                run_id=_optional_str(args, "run_id"),
-            ),
-        )
-
-    def _runtime_disable_loop(self, args: dict[str, Any]) -> McpToolResult:
-        """内部辅助函数，封装 runtime disable loop 逻辑。"""
-        return McpToolResult(
-            ok=True,
-            message="runtime loop disabled",
-            data=self.core_runtime.disable_loop(
-                loop_id=_required_str(args, "loop_id"),
-                actor=_actor(args),
-                run_id=_optional_str(args, "run_id"),
-            ),
-        )
-
     def _channel(self, args: dict[str, Any]) -> str:
-        """读取 MCP 参数中的 channel，缺省使用 server 默认 channel。"""
         return _optional_str(args, "channel") or self.default_channel
 
 
 def _as_tool_result(result: ChannelOutboundResult) -> McpToolResult:
-    """把 channel outbox 结果转换为 MCP tool result。"""
+    """Convert a channel outbox result into an MCP tool result."""
+
     data = dict(result.data)
     if result.external_message_id is not None:
         data.setdefault("message_id", result.external_message_id)
@@ -212,7 +100,6 @@ def _as_tool_result(result: ChannelOutboundResult) -> McpToolResult:
 
 
 def _required_str(payload: dict[str, Any], key: str) -> str:
-    """读取必填字符串字段，不合法时抛出 RuntimeError。"""
     value = payload.get(key)
     if not isinstance(value, str) or not value.strip():
         raise RuntimeError(f"{key} is required")
@@ -220,7 +107,6 @@ def _required_str(payload: dict[str, Any], key: str) -> str:
 
 
 def _optional_str(payload: dict[str, Any], key: str) -> str | None:
-    """读取可选字符串字段，并把空白字符串归一为空值。"""
     value = payload.get(key)
     if value is None:
         return None
@@ -231,28 +117,7 @@ def _optional_str(payload: dict[str, Any], key: str) -> str | None:
 
 
 def _required_object(payload: dict[str, Any], key: str) -> dict[str, Any]:
-    """读取必填对象参数。"""
     value = payload.get(key)
     if not isinstance(value, dict):
         raise RuntimeError(f"{key} must be an object")
     return value
-
-
-def _optional_limit(payload: dict[str, Any], key: str, *, default: int) -> int:
-    """读取分页/列表 limit，并夹紧到安全范围。"""
-    value = payload.get(key, default)
-    if not isinstance(value, int):
-        raise RuntimeError(f"{key} must be an integer")
-    return max(1, min(value, 50))
-
-
-def _actor(payload: dict[str, Any]) -> str:
-    """读取审计 actor，缺省为 agent:mcp。"""
-    return _optional_str(payload, "actor") or "agent:mcp"
-
-
-def _reject_unexpected_args(payload: dict[str, Any], *, allowed: tuple[str, ...]) -> None:
-    """拒绝 schema 不允许的额外参数。"""
-    unexpected = sorted(set(payload) - set(allowed))
-    if unexpected:
-        raise RuntimeError(f"unexpected arguments: {', '.join(unexpected)}")

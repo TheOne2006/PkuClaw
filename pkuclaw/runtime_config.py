@@ -1,4 +1,4 @@
-"""热加载 runtime.json，并提供带校验、备份、原子写入的配置更新。"""
+"""Hot-load runtime.json and validate editable runtime files."""
 from __future__ import annotations
 
 import copy
@@ -12,7 +12,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
-from pkuclaw.core.models import AgentSettings
+from pkuclaw.core.models import (
+    DEFAULT_AGENT_MODE,
+    DEFAULT_AGENT_MODEL,
+    DEFAULT_AGENT_PROVIDER,
+    DEFAULT_AGENT_REASONING_EFFORT,
+    AgentSettings,
+)
 
 
 RUNTIME_CONFIG_FILE = "runtime.json"
@@ -45,24 +51,9 @@ class RuntimeLoopConfig:
 
 
 @dataclass(frozen=True)
-class RuntimePromptConfig:
-    """runtime.json 中的 prompt fragment 和默认 skill 配置。"""
-    fragment_paths: tuple[str, ...] = ()
-    default_skill_names: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
 class RuntimeNotificationConfig:
     """runtime.json 中的通知策略配置。"""
     policy: str = "important_only"
-
-
-@dataclass(frozen=True)
-class RuntimePermissionConfig:
-    """runtime.json 中限制 Agent 写配置的权限开关。"""
-    agent_can_update_runtime: bool = True
-    agent_can_add_loop: bool = True
-    agent_can_modify_boot_config: bool = False
 
 
 @dataclass(frozen=True)
@@ -73,9 +64,7 @@ class RuntimeConfig:
     agent: AgentSettings
     codex: RuntimeCodexConfig
     loops: tuple[RuntimeLoopConfig, ...]
-    prompt: RuntimePromptConfig
     notifications: RuntimeNotificationConfig
-    permissions: RuntimePermissionConfig
     warnings: tuple[str, ...] = field(default_factory=tuple)
 
 
@@ -95,9 +84,7 @@ class RuntimeConfigWriteResult:
 class RuntimeConfigStore:
     """Hot-loaded runtime config store.
 
-    Public write methods are intentionally narrow: callers can add/update/
-    enable/disable loops, but cannot bypass validation, backup, atomic write,
-    and audit handled by CoreRuntime.
+    Runtime files are ordinary editable files; these helpers only provide validated local writes for non-MCP callers.
     """
 
     def __init__(self, config_dir: Path) -> None:
@@ -144,7 +131,7 @@ class RuntimeConfigStore:
             raw["loops"] = [*loops, normalized_loop]
             return self._commit_candidate(
                 raw,
-                action="runtime_add_loop",
+                action="add_loop",
                 diff_summary=f"add loop {loop_id}",
             )
 
@@ -153,7 +140,7 @@ class RuntimeConfigStore:
         loop_id: str,
         updates: Mapping[str, Any],
         *,
-        action: str = "runtime_update_loop",
+        action: str = "update_loop",
     ) -> RuntimeConfigWriteResult:
         """合并单个 loop 的允许字段，重新校验后安全写入。"""
         loop_id = _validate_loop_id_value(loop_id)
@@ -195,7 +182,7 @@ class RuntimeConfigStore:
         return self.update_loop(
             loop_id,
             {"enabled": True},
-            action="runtime_enable_loop",
+            action="enable_loop",
         )
 
     def disable_loop(self, loop_id: str) -> RuntimeConfigWriteResult:
@@ -203,7 +190,7 @@ class RuntimeConfigStore:
         return self.update_loop(
             loop_id,
             {"enabled": False},
-            action="runtime_disable_loop",
+            action="disable_loop",
         )
 
     def _backup_current(self) -> Path | None:
@@ -313,9 +300,7 @@ def _with_warning(config: RuntimeConfig, warning: str) -> RuntimeConfig:
         agent=config.agent,
         codex=config.codex,
         loops=config.loops,
-        prompt=config.prompt,
         notifications=config.notifications,
-        permissions=config.permissions,
         warnings=(*config.warnings, warning),
     )
 
@@ -328,17 +313,18 @@ def _parse_config(raw: Mapping[str, Any], *, path: Path) -> RuntimeConfig:
     schema_version = _schema_version(raw)
     agent_raw = _section(raw, "agent")
     codex_raw = _section(raw, "codex")
-    prompt_raw = _section(raw, "prompt")
     notifications_raw = _section(raw, "notifications")
-    permissions_raw = _section(raw, "permissions")
     return RuntimeConfig(
         path=path,
         schema_version=schema_version,
         agent=AgentSettings(
-            provider=_optional_str(agent_raw, "provider") or "codex",
-            mode=_optional_str(agent_raw, "mode") or "standard",
-            model=_optional_str(agent_raw, "model"),
-            reasoning_effort=_optional_str(agent_raw, "reasoning_effort"),
+            provider=_optional_str(agent_raw, "provider") or DEFAULT_AGENT_PROVIDER,
+            mode=_optional_str(agent_raw, "mode") or DEFAULT_AGENT_MODE,
+            model=_optional_str(agent_raw, "model") or DEFAULT_AGENT_MODEL,
+            reasoning_effort=(
+                _optional_str(agent_raw, "reasoning_effort")
+                or DEFAULT_AGENT_REASONING_EFFORT
+            ),
         ),
         codex=RuntimeCodexConfig(
             sandbox=_optional_str(codex_raw, "sandbox") or "workspace-write",
@@ -349,32 +335,8 @@ def _parse_config(raw: Mapping[str, Any], *, path: Path) -> RuntimeConfig:
             ),
         ),
         loops=_read_loops(raw),
-        prompt=RuntimePromptConfig(
-            fragment_paths=_optional_str_tuple(prompt_raw, "fragment_paths"),
-            default_skill_names=_optional_str_tuple(
-                prompt_raw,
-                "default_skill_names",
-            ),
-        ),
         notifications=RuntimeNotificationConfig(
             policy=_optional_str(notifications_raw, "policy") or "important_only",
-        ),
-        permissions=RuntimePermissionConfig(
-            agent_can_update_runtime=_optional_bool(
-                permissions_raw,
-                "agent_can_update_runtime",
-                default=True,
-            ),
-            agent_can_add_loop=_optional_bool(
-                permissions_raw,
-                "agent_can_add_loop",
-                default=True,
-            ),
-            agent_can_modify_boot_config=_optional_bool(
-                permissions_raw,
-                "agent_can_modify_boot_config",
-                default=False,
-            ),
         ),
     )
 
@@ -461,7 +423,7 @@ def _default_loops() -> tuple[RuntimeLoopConfig, ...]:
             id="sync_notices",
             enabled=True,
             interval_seconds=900,
-            prompt="检查课程状态、教学网通知和本地数据。如果没有重要变化，保持静默。",
+            prompt="检查课程状态、教学网通知和本地数据。如果没有重要变化，保持静默；如果发现重要变化，使用 channel notification tools 通知用户。",
             skill_names=("tasks/sync-notices.md",),
             sink_mode="silent",
             notify_policy="important_only",
@@ -475,27 +437,18 @@ def _default_raw_config() -> dict[str, Any]:
     return {
         "schema_version": SUPPORTED_SCHEMA_VERSION,
         "agent": {
-            "provider": "codex",
-            "mode": "standard",
-            "model": "",
-            "reasoning_effort": "",
+            "provider": DEFAULT_AGENT_PROVIDER,
+            "mode": DEFAULT_AGENT_MODE,
+            "model": DEFAULT_AGENT_MODEL,
+            "reasoning_effort": DEFAULT_AGENT_REASONING_EFFORT,
         },
         "codex": {
             "sandbox": "workspace-write",
             "timeout_seconds": 1800,
         },
         "loops": [_loop_config_to_raw(loop) for loop in _default_loops()],
-        "prompt": {
-            "fragment_paths": [],
-            "default_skill_names": [],
-        },
         "notifications": {
             "policy": "important_only",
-        },
-        "permissions": {
-            "agent_can_update_runtime": True,
-            "agent_can_add_loop": True,
-            "agent_can_modify_boot_config": False,
         },
     }
 
@@ -505,27 +458,20 @@ def _config_to_raw(config: RuntimeConfig) -> dict[str, Any]:
     return {
         "schema_version": config.schema_version,
         "agent": {
-            "provider": config.agent.provider or "codex",
-            "mode": config.agent.mode or "standard",
-            "model": config.agent.model or "",
-            "reasoning_effort": config.agent.reasoning_effort or "",
+            "provider": config.agent.provider or DEFAULT_AGENT_PROVIDER,
+            "mode": config.agent.mode or DEFAULT_AGENT_MODE,
+            "model": config.agent.model or DEFAULT_AGENT_MODEL,
+            "reasoning_effort": (
+                config.agent.reasoning_effort or DEFAULT_AGENT_REASONING_EFFORT
+            ),
         },
         "codex": {
             "sandbox": config.codex.sandbox or "workspace-write",
             "timeout_seconds": config.codex.timeout_seconds,
         },
         "loops": [_loop_config_to_raw(loop) for loop in config.loops],
-        "prompt": {
-            "fragment_paths": list(config.prompt.fragment_paths),
-            "default_skill_names": list(config.prompt.default_skill_names),
-        },
         "notifications": {
             "policy": config.notifications.policy,
-        },
-        "permissions": {
-            "agent_can_update_runtime": config.permissions.agent_can_update_runtime,
-            "agent_can_add_loop": config.permissions.agent_can_add_loop,
-            "agent_can_modify_boot_config": config.permissions.agent_can_modify_boot_config,
         },
     }
 
@@ -664,9 +610,9 @@ def _loop_update_summary(
 ) -> str:
     """生成 loop 更新操作的简短审计摘要。"""
     changed_keys = sorted(str(key) for key in updates.keys() if key != "id")
-    if action == "runtime_enable_loop":
+    if action == "enable_loop":
         return f"enable loop {loop_id}"
-    if action == "runtime_disable_loop":
+    if action == "disable_loop":
         return f"disable loop {loop_id}"
     return f"update loop {loop_id} keys={','.join(changed_keys) or 'none'}"
 

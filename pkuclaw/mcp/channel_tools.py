@@ -1,4 +1,4 @@
-"""daemon MCP 工具调用返回值的数据模型。"""
+"""MCP notification tool result models."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -7,7 +7,7 @@ from typing import Any
 
 @dataclass(frozen=True)
 class McpToolResult:
-    """Protocol-neutral result returned by daemon MCP tool handlers."""
+    """Protocol-neutral result returned by MCP notification tool handlers."""
 
     ok: bool
     message: str

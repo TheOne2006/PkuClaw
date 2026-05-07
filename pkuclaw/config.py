@@ -71,7 +71,7 @@ class MonitorConfig:
 
 @dataclass(frozen=True)
 class McpConfig:
-    """daemon MCP HTTP 服务监听配置。"""
+    """notification MCP HTTP 服务监听配置。"""
     host: str
     port: int
 

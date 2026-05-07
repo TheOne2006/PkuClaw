@@ -13,11 +13,18 @@ from pkuclaw.agents.base import AgentRunContext
 from pkuclaw.config import Settings
 from pkuclaw.core import logging as log
 from pkuclaw.core.models import (
+    DEFAULT_AGENT_MODEL,
+    DEFAULT_AGENT_REASONING_EFFORT,
     AgentEvent,
     AgentEventSink,
     AgentResult,
     AgentSettings,
 )
+
+
+CODEX_APPROVAL_REVIEWER = "auto_review"
+CODEX_DEFAULT_TOOLS_APPROVAL_MODE = "auto_review"
+
 
 class CodexAgent:
     """通过 codex exec --json 执行 PkuClaw prompt 的 Agent provider。"""
@@ -44,7 +51,7 @@ class CodexAgent:
         paths = context.paths
         log.event(
             "codex agent context: "
-            f"agent={self.name}, run={run.run_id}, intent={context.plan.intent}, "
+            f"agent={self.name}, run={run.run_id}, source={context.request.source}, "
             f"mode={agent_settings.mode}, "
             f"model={self._effective_model(agent_settings) or 'default'}, "
             "reasoning="
@@ -75,6 +82,7 @@ class CodexAgent:
             result_path=paths.result_path,
             agent_settings=agent_settings,
             runtime=context.runtime,
+            enable_mcp=context.request.source == "loop",
         )
         mode = "resume" if context.conversation.agent_session_id else "new"
         log.stage(
@@ -277,13 +285,15 @@ class CodexAgent:
         result_path: Path,
         agent_settings: AgentSettings,
         runtime: Any,
+        enable_mcp: bool,
     ) -> list[str]:
         """根据是否已有 session 拼出 codex exec/resume 命令行。"""
         command = [self.settings.codex.bin, "exec"]
         if session_id:
             command.extend(["resume", "--json", "-o", str(result_path)])
             self._append_runtime_options(command, agent_settings)
-            self._append_mcp_server(command)
+            if enable_mcp:
+                self._append_mcp_server(command)
             command.extend([session_id, "-"])
             return command
 
@@ -299,7 +309,8 @@ class CodexAgent:
             ]
         )
         self._append_runtime_options(command, agent_settings)
-        self._append_mcp_server(command)
+        if enable_mcp:
+            self._append_mcp_server(command)
         command.append("-")
         return command
 
@@ -308,16 +319,27 @@ class CodexAgent:
         command: list[str],
         agent_settings: AgentSettings,
     ) -> None:
-        """把 model 和 reasoning 选项追加到 Codex 命令行。"""
+        """把固定 model、reasoning 和 auto-review 选项追加到 Codex 命令行。"""
         model = self._effective_model(agent_settings)
         if model:
             command.extend(["-m", model])
         reasoning = self._effective_reasoning(agent_settings)
         if reasoning:
             command.extend(["-c", f'model_reasoning_effort="{reasoning}"'])
+        command.extend(
+            [
+                "-c",
+                f'approvals_reviewer="{CODEX_APPROVAL_REVIEWER}"',
+                "-c",
+                (
+                    "default_tools_approval_mode="
+                    f'"{CODEX_DEFAULT_TOOLS_APPROVAL_MODE}"'
+                ),
+            ]
+        )
 
     def _append_mcp_server(self, command: list[str]) -> None:
-        """把 daemon MCP server URL 注入 Codex 配置。"""
+        """Expose channel notification tools to loop runs."""
         url = f"http://{self.settings.mcp.host}:{self.settings.mcp.port}/mcp"
         command.extend(
             [
@@ -328,17 +350,11 @@ class CodexAgent:
 
     def _effective_model(self, agent_settings: AgentSettings) -> str | None:
         """合并会话/runtime 和启动配置后的 Codex model。"""
-        return agent_settings.model or self.settings.codex.model
+        return agent_settings.model or self.settings.codex.model or DEFAULT_AGENT_MODEL
 
     def _effective_reasoning(self, agent_settings: AgentSettings) -> str | None:
-        """合并显式 reasoning 或 mode 映射后的 Codex reasoning effort。"""
-        if agent_settings.reasoning_effort:
-            return agent_settings.reasoning_effort
-        return {
-            "fast": "low",
-            "standard": "medium",
-            "deep": "high",
-        }.get(agent_settings.mode)
+        """返回固定默认的 Codex reasoning effort，忽略旧 mode preset。"""
+        return agent_settings.reasoning_effort or DEFAULT_AGENT_REASONING_EFFORT
 
     def _effective_sandbox(self, runtime: Any) -> str:
         """合并 runtime 和启动配置后的 Codex sandbox。"""

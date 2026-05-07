@@ -1,4 +1,4 @@
-"""极简 HTTP JSON-RPC/MCP server，暴露 Agent -> CoreRuntime 工具。"""
+"""Minimal HTTP JSON-RPC/MCP server for loop notification tools."""
 from __future__ import annotations
 
 import json
@@ -13,7 +13,7 @@ from pkuclaw.mcp.handlers import DaemonMcpToolHandler
 
 @dataclass
 class DaemonMcpServer:
-    """HTTP JSON-RPC/MCP protocol layer for Agent -> CoreRuntime tools."""
+    """HTTP JSON-RPC/MCP protocol layer for channel notification tools."""
 
     host: str
     port: int
@@ -28,7 +28,7 @@ class DaemonMcpServer:
         )
         handler = _handler_factory(tool_handler)
         server = ThreadingHTTPServer((self.host, self.port), handler)
-        log.ok(f"Daemon MCP listening: http://{self.host}:{self.port}")
+        log.ok(f"Notification MCP listening: http://{self.host}:{self.port}")
         server.serve_forever()
 
 

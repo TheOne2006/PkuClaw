@@ -1,67 +1,54 @@
-# PkuClaw Runtime Config
+# PkuClaw Runtime Files
 
-This directory is the live, hot-loaded runtime configuration area. Boot secrets
-and bind addresses belong in `configs/config.toml`; live agent behavior belongs
-here.
-
-Current source of truth:
+`configs/runtime/` is the editable runtime surface for Agents and operators.
+Agents should read or modify these files directly when the task requires it:
 
 ```text
-runtime.json    # current live runtime snapshot; agent/provider/loops/policy
-skills.json     # skill registry: metadata, dependency graph, source policy
-backups/        # automatic backups before runtime writes
+configs/runtime/
+  runtime.json          # hot-loaded agent/loop/notification runtime config
+  skills.json           # skill catalog metadata and dependency graph
+  skills/               # runtime skill markdown files
+    runtime/
+    tasks/
+    tools/
 ```
 
-Future optional split:
+## Run sources
 
-```text
-loops.json      # dynamic loop specs
-prompts/        # prompt fragments loaded before runs
-```
+PkuClaw has only two Agent run sources:
 
-Safety model:
+- `realtime`: a user message that should receive a direct natural-language reply.
+- `loop`: a scheduled background task that stays silent unless it finds something important.
 
-1. CoreRuntime reads live config before realtime runs, loop ticks, and runtime MCP
-   mutations.
-2. Files are parsed, validated, merged with immutable defaults, and normalized
-   into a runtime snapshot.
-3. If live config is invalid, CoreRuntime falls back to the last valid snapshot;
-   if none exists, immutable defaults keep the daemon runnable.
-4. Runtime writes from Agents go through daemon MCP -> CoreRuntime so CoreRuntime
-   can validate, backup the current `runtime.json`, write a `.tmp` file with
-   fsync, atomically replace the source file, and audit the change in Store.
-5. Direct human file edits are tolerated for operations/debugging, but they are
-   validated only on hot-load and do not create Store audit records; invalid
-   edits must never crash the daemon.
+There is no natural-language routing field. Realtime runs use `suggested_skills = ()` by default. Loop runs use the explicit `skill_names` configured on the loop entry in `runtime.json`; these are rendered as suggested skills, not injected as full markdown bodies.
 
-Write audit:
+## Skills
 
-- The SQLite `runtime_changes` table records actor, optional run_id, file,
-  action, old/new hashes, sanitized diff summary, status, and timestamp.
-- Backups are written to `backups/runtime.<timestamp>.json` before replacement.
+The source of truth for skills is:
 
-Loop specs:
+- `configs/runtime/skills.json`
+- `configs/runtime/skills/**`
 
-- Enabled loops are hot-loaded by `LoopManager` and scheduled independently by
-  `interval_seconds`.
-- Loop runs are silent by default (`sink_mode: "silent"`); important user-visible
-  updates should be sent by the Agent through daemon MCP channel tools.
-- Optional `default_channel`, `default_target_type`, and `default_target_id`
-  provide a default notification target for those MCP channel tools.
-- `prevent_overlap` defaults to `true`, so a loop is not scheduled again while
-  its previous run is still queued/running. If overlap is deliberately allowed,
-  set `prevent_overlap: false` and use `max_concurrent_runs` to cap same-loop
-  concurrency.
+Each catalog entry provides:
 
-Skill registry:
+- `name`
+- `description`
+- `path`
+- `dependencies`
+- `allowed_sources`
+- `requires_confirmation`
 
-- `skills.json` uses `schema_version: 1` and a `skills` array.
-- Each skill entry has `name`, `intent`, `dependencies`, `allowed_sources`, and
-  `requires_confirmation`.
-- Names and dependencies are relative paths under `sub-skills/`; absolute paths
-  and `..` escaping are rejected.
-- `AgentWrapper` always injects the base runtime skill
-  `runtime/codex-subagent.md`, then requested/default task skills, then resolved
-  dependencies.
-- If `skills.json` is missing or invalid, the loader falls back to an immutable
-  default registry and records a runtime warning for the run prompt/metadata.
+Prompt builders render only the Skill Catalog. Agents choose relevant skills and read the markdown files by `path` when needed. `configs/runtime/skills/` is writable so Agents can create or update skills during runtime when explicitly appropriate.
+
+`sub-skills/` is no longer a runtime skill source.
+
+## Notifications
+
+Loop prompts expose only channel notification tools:
+
+- `channel_send_text`
+- `channel_send_card`
+- `channel_send_image`
+- `channel_update_card`
+
+Use them only for important loop findings. Realtime prompts do not include MCP tools.

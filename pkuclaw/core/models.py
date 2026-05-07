@@ -1,4 +1,4 @@
-"""CoreRuntime、AgentWrapper 和 channel 之间共享的数据模型。"""
+"""Shared data models for CoreRuntime, AgentWrapper, and channels."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -8,9 +8,17 @@ from typing import Any, Protocol
 from pkuclaw.channels.base import ChannelTarget
 
 
+DEFAULT_AGENT_PROVIDER = "codex"
+DEFAULT_AGENT_MODE = "fixed"
+DEFAULT_AGENT_MODEL = "gpt-5.5"
+DEFAULT_AGENT_REASONING_EFFORT = "xhigh"
+RUN_SOURCES = ("realtime", "loop")
+
+
 @dataclass(frozen=True)
 class CoreDispatch:
-    """CoreRuntime 对一次 channel/loop 输入的调度结果。"""
+    """CoreRuntime dispatch result for one channel or loop input."""
+
     reply_text: str
     run_id: str | None = None
     plan: "TaskPlan | None" = None
@@ -21,16 +29,17 @@ class CoreDispatch:
 
 @dataclass(frozen=True)
 class TaskPlan:
-    """路由器为 Agent run 选择出的意图、skills 和用户提示。"""
-    intent: str
-    skill_names: tuple[str, ...]
+    """Fixed per-run suggested skills and acknowledgement text."""
+
+    suggested_skills: tuple[str, ...]
     ack: str
     requires_agent: bool = True
 
 
 @dataclass(frozen=True)
 class AgentSettings:
-    """Agent provider、模式、模型和 reasoning 的可覆盖配置。"""
+    """Agent provider, mode, model and reasoning overrides."""
+
     provider: str | None = None
     mode: str | None = None
     model: str | None = None
@@ -39,21 +48,29 @@ class AgentSettings:
 
 @dataclass(frozen=True)
 class AgentRunRequest:
-    """CoreRuntime 交给 AgentWrapper 的规范化运行请求。"""
+    """Normalized request handed from CoreRuntime to AgentWrapper."""
+
     source: str
     conversation_id: str
     text: str
-    intent: str
-    skill_names: tuple[str, ...]
+    suggested_skills: tuple[str, ...]
     channel: str | None = None
     sender_id: str | None = None
     channel_context: dict[str, Any] = field(default_factory=dict)
     sink_mode: str = "streaming"
 
+    def __post_init__(self) -> None:
+        if self.source not in RUN_SOURCES:
+            raise RuntimeError(
+                f"unsupported agent run source: {self.source}; "
+                f"expected one of {', '.join(RUN_SOURCES)}"
+            )
+
 
 @dataclass(frozen=True)
 class AgentResult:
-    """具体 Agent provider 执行结束后的统一结果。"""
+    """Unified result returned by a concrete Agent provider."""
+
     run_id: str
     status: str
     response_text: str
@@ -64,7 +81,8 @@ class AgentResult:
 
 @dataclass(frozen=True)
 class AgentEvent:
-    """provider 输出给 channel sink 的结构化事件。"""
+    """Structured event emitted by provider execution to channel sinks."""
+
     run_id: str
     kind: str
     message: str
@@ -73,19 +91,25 @@ class AgentEvent:
 
 
 class AgentEventSink(Protocol):
-    """接收 AgentEvent 的 channel-neutral 协议。"""
+    """Channel-neutral sink for provider events."""
+
     def emit(self, event: AgentEvent) -> None:
-        """Receive a structured, channel-neutral agent event."""
+        """Receive a structured provider event."""
 
 
 def merge_agent_settings(
     defaults: AgentSettings,
     overrides: AgentSettings,
 ) -> AgentSettings:
-    """按会话覆盖优先、runtime 默认兜底的顺序合并 Agent 设置。"""
+    """Merge conversation overrides over runtime defaults."""
+
     return AgentSettings(
-        provider=overrides.provider or defaults.provider or "codex",
-        mode=overrides.mode or defaults.mode or "standard",
-        model=overrides.model or defaults.model,
-        reasoning_effort=overrides.reasoning_effort or defaults.reasoning_effort,
+        provider=overrides.provider or defaults.provider or DEFAULT_AGENT_PROVIDER,
+        mode=overrides.mode or defaults.mode or DEFAULT_AGENT_MODE,
+        model=overrides.model or defaults.model or DEFAULT_AGENT_MODEL,
+        reasoning_effort=(
+            overrides.reasoning_effort
+            or defaults.reasoning_effort
+            or DEFAULT_AGENT_REASONING_EFFORT
+        ),
     )

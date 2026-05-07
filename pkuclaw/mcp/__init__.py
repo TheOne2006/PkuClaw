@@ -1,4 +1,4 @@
-"""daemon MCP 包导出，使用懒加载避免 CoreRuntime 相关循环导入。"""
+"""MCP notification package exports with lazy CoreRuntime imports."""
 from __future__ import annotations
 
 from pkuclaw.mcp.channel_tools import McpToolResult

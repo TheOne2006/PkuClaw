@@ -1,1 +1,1 @@
-"""Core runtime models, state, controls, and routing."""
+"""Core runtime models, state, controls, and dispatch helpers."""
