@@ -10,6 +10,17 @@ from typing import Any
 from pkuclaw.core.store import RunRecord
 
 
+_CODEX_EVENT_LABELS = {
+    "session_configured": "会话已配置",
+    "thread.started": "线程开始",
+    "turn.started": "回合开始",
+    "turn.completed": "回合完成",
+    "item.started": "步骤开始",
+    "item.completed": "步骤完成",
+    "item.failed": "步骤失败",
+}
+
+
 @dataclass(frozen=True)
 class AgentArtifactDetail:
     """运行详情卡所需的耗时、产物路径和 Codex 事件摘要。"""
@@ -32,6 +43,7 @@ def build_codex_artifact_detail(
     return AgentArtifactDetail(
         elapsed=_run_elapsed(run.created_at, run.finished_at),
         artifacts={
+            "run_dir": _artifact_label(run_dir),
             "prompt": _artifact_label(prompt_path),
             "stdout": _artifact_label(stdout_path),
             "stderr": _artifact_label(stderr_path),
@@ -79,13 +91,19 @@ def _codex_trace_line(line: str) -> str:
         or data.get("kind")
         or "codex_event"
     )
+    label = _codex_event_label(event_type)
     command = _find_key_recursive(data, {"command"})
     if isinstance(command, str) and command.strip():
-        return f"{event_type}: command {_compact_text(command, 140)}"
+        return f"{label}：执行命令"
     text = _find_key_recursive(data, {"delta", "text", "message", "content"})
     if isinstance(text, str) and text.strip():
-        return f"{event_type}: {_compact_text(text, 160)}"
-    return event_type
+        return f"{label}：{_compact_text(text, 120)}"
+    return label
+
+
+def _codex_event_label(event_type: str) -> str:
+    """把 Codex JSONL event type 映射为详情卡里的短文本。"""
+    return _CODEX_EVENT_LABELS.get(event_type, event_type or "Codex 事件")
 
 
 def _find_key_recursive(value: Any, keys: set[str]) -> Any:

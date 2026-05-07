@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from pkuclaw.channels.base import ChannelOutboundResult
-from pkuclaw.core.app import CoreRuntime
+from pkuclaw.core.runtime import CoreRuntime
 from pkuclaw.mcp.channel_tools import McpToolResult
 from pkuclaw.mcp.schemas import list_tool_schemas
 

@@ -10,11 +10,11 @@ from pkuclaw.agents.wrapper import AgentWrapper
 from pkuclaw.channels.feishu.gateway import FeishuRealtimeGateway, build_feishu_realtime_gateway
 from pkuclaw.config import Settings
 from pkuclaw.core import logging as log
-from pkuclaw.core.app import CoreRuntime
+from pkuclaw.core.runtime import CoreRuntime
 from pkuclaw.core.store import Store
-from pkuclaw.loop import LoopManager
+from pkuclaw.core.loops import LoopManager
 from pkuclaw.mcp.server import DaemonMcpServer
-from pkuclaw.runtime_config import RuntimeConfigStore
+from pkuclaw.runtime.config import RuntimeConfigStore
 
 
 @dataclass(frozen=True)

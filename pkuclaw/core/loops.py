@@ -9,10 +9,10 @@ from dataclasses import dataclass, field
 from pkuclaw.agents.sinks import SilentSink
 from pkuclaw.config import Settings
 from pkuclaw.core import logging as log
-from pkuclaw.core.app import CoreRuntime
+from pkuclaw.core.runtime import CoreRuntime
 from pkuclaw.core.models import CoreDispatch
 from pkuclaw.core.store import utc_now
-from pkuclaw.runtime_config import RuntimeLoopConfig
+from pkuclaw.runtime.config import RuntimeLoopConfig
 
 
 @dataclass(frozen=True)

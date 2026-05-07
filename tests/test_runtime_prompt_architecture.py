@@ -7,7 +7,7 @@ from pathlib import Path
 
 from pkuclaw.agents.wrapper import AgentWrapper
 from pkuclaw.channels.base import ChannelInboundMessage, ChannelTarget
-from pkuclaw.core.app import CoreRuntime
+from pkuclaw.core.runtime import CoreRuntime
 from pkuclaw.config import (
     AgentConfig,
     AppConfig,
@@ -20,10 +20,10 @@ from pkuclaw.config import (
 from pkuclaw.core.models import AgentRunRequest, TaskPlan
 from pkuclaw.core.store import Store
 from pkuclaw.mcp.schemas import list_tool_schemas, render_tool_prompt
-from pkuclaw.runtime_config import RuntimeConfigStore
-from pkuclaw.runtime_events import read_event_catalog, resolve_channel_event_id
-from pkuclaw.runtime_prompts import read_prompt_templates, render_prompt_template
-from pkuclaw.code_agents.subskills import load_skill_registry, resolve_subskill_names
+from pkuclaw.runtime.config import RuntimeConfigStore
+from pkuclaw.runtime.events import read_event_catalog, resolve_channel_event_id
+from pkuclaw.runtime.prompts import read_prompt_templates, render_prompt_template
+from pkuclaw.runtime.skills import load_skill_registry, resolve_subskill_names
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -81,6 +81,27 @@ def _core_runtime(wrapper: AgentWrapper) -> CoreRuntime:
 
 
 class PromptArchitectureTests(unittest.TestCase):
+    def test_python_package_layout_has_no_legacy_runtime_modules(self) -> None:
+        for path in (
+            ROOT / "pkuclaw" / "runtime" / "config.py",
+            ROOT / "pkuclaw" / "runtime" / "events.py",
+            ROOT / "pkuclaw" / "runtime" / "prompts.py",
+            ROOT / "pkuclaw" / "runtime" / "skills.py",
+            ROOT / "pkuclaw" / "agents" / "providers" / "codex.py",
+            ROOT / "pkuclaw" / "core" / "runtime.py",
+            ROOT / "pkuclaw" / "core" / "loops.py",
+        ):
+            self.assertTrue(path.is_file(), str(path))
+
+        for path in (
+            ROOT / "pkuclaw" / "runtime_config.py",
+            ROOT / "pkuclaw" / "runtime_events.py",
+            ROOT / "pkuclaw" / "runtime_prompts.py",
+            ROOT / "pkuclaw" / "code_agents",
+            ROOT / "pkuclaw" / "connectors" / "pku3b.py",
+        ):
+            self.assertFalse(path.exists(), str(path))
+
     def test_prompt_templates_are_runtime_files_not_wrapper_literals(self) -> None:
         templates = read_prompt_templates(ROOT / "configs" / "runtime")
         self.assertIn("# PkuClaw Realtime Task", templates.realtime.template)

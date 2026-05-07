@@ -13,7 +13,7 @@ from pkuclaw.core.models import (
     TaskPlan,
 )
 from pkuclaw.core.store import Conversation, RunRecord
-from pkuclaw.runtime_config import RuntimeConfig
+from pkuclaw.runtime.config import RuntimeConfig
 
 
 @dataclass(frozen=True)

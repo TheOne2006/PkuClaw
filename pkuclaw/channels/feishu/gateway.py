@@ -7,7 +7,7 @@ from typing import Any, ClassVar
 
 from pkuclaw.config import Settings
 from pkuclaw.core import logging as log
-from pkuclaw.core.app import CoreRuntime
+from pkuclaw.core.runtime import CoreRuntime
 
 from .cards import FeishuCardKitClient, FeishuCardRenderer
 from .handlers import FeishuEventHandlers

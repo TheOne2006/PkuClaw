@@ -92,11 +92,20 @@ Runtime status/config/loop management tools are removed from the Agent-facing MC
 
 ```text
 pkuclaw/
-  agents/             # AgentWrapper and sinks
-  code_agents/        # Codex provider and runtime skill catalog loader
-  core/               # CoreRuntime, shared models, Store
+  agents/             # AgentWrapper, sinks, artifacts, provider implementations
+    providers/
+      codex.py
+  core/               # CoreRuntime, LoopManager, shared models, Store
+    runtime.py
+    loops.py
+    models.py
+    store.py
+  runtime/            # hot-loaded editable runtime file readers
+    config.py         # configs/runtime/runtime.json
+    events.py         # configs/runtime/events.json
+    prompts.py        # configs/runtime/prompts.json
+    skills.py         # configs/runtime/skills.json + skills/**
   mcp/                # channel notification tool schemas/handlers/server
-  runtime_config.py   # hot-loads and validates runtime.json
 configs/runtime/
   runtime.json
   events.json

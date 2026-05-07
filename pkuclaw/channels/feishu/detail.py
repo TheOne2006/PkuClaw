@@ -3,10 +3,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from pkuclaw.code_agents.artifacts import build_codex_artifact_detail
+from pkuclaw.agents.artifacts import build_codex_artifact_detail
 from pkuclaw.config import Settings
 from pkuclaw.core import logging as log
-from pkuclaw.core.app import CoreRuntime
+from pkuclaw.core.runtime import CoreRuntime
 from pkuclaw.core.models import merge_agent_settings
 
 from .cards import FeishuCardKitClient, FeishuCardRenderer

@@ -19,10 +19,10 @@ from pkuclaw.core.models import (
 )
 from pkuclaw.core.store import RunRecord, Store
 from pkuclaw.mcp.schemas import render_tool_prompt
-from pkuclaw.runtime_config import RuntimeConfigStore
-from pkuclaw.runtime_prompts import read_prompt_templates, render_prompt_template
-from pkuclaw.code_agents.codex import CodexAgent
-from pkuclaw.code_agents.subskills import (
+from pkuclaw.runtime.config import RuntimeConfigStore
+from pkuclaw.runtime.prompts import read_prompt_templates, render_prompt_template
+from pkuclaw.agents.providers.codex import CodexAgent
+from pkuclaw.runtime.skills import (
     load_skill_registry,
     render_skill_catalog,
     render_suggested_skills,

@@ -9,8 +9,8 @@ from typing import Any
 from pkuclaw.channels.base import ChannelInboundMessage, ChannelTarget
 from pkuclaw.config import Settings
 from pkuclaw.core import logging as log
-from pkuclaw.core.app import CoreRuntime
-from pkuclaw.runtime_events import resolve_channel_event_id
+from pkuclaw.core.runtime import CoreRuntime
+from pkuclaw.runtime.events import resolve_channel_event_id
 
 from .cards import (
     FeishuCardKitClient,

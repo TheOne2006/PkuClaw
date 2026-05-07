@@ -112,7 +112,24 @@ Objective、通知文案、Suggested Skills 小节等，直接改 runtime 的 `p
 
 Loop prompt 不复用 realtime prompt，也不包含 runtime 管理工具。
 
-## 6. MCP 范围
+## 6. 代码归属
+
+当前 Python 包分层：
+
+```text
+pkuclaw/
+  core/       # CoreRuntime、LoopManager、共享模型、Store
+  runtime/    # configs/runtime/* 的热读 loader：config/events/prompts/skills
+  agents/     # AgentWrapper、sink、artifact、providers/codex.py
+  channels/   # Feishu 等平台 adapter：事件转换、流式展示、卡片详情
+  mcp/        # loop 主动通知用户的 channel notification tools
+```
+
+不要再新增顶层 `runtime_*.py`、`code_agents/` 或业务 connector 包。
+如果是 runtime 文件 loader，放 `pkuclaw/runtime/`；如果是具体 Agent provider，放
+`pkuclaw/agents/providers/`；如果是平台事件/展示逻辑，放对应 `channels/`。
+
+## 7. MCP 范围
 
 MCP 目前只保留 loop 主动通知用户能力。可暴露给 loop prompt 的工具是：
 
@@ -123,7 +140,7 @@ MCP 目前只保留 loop 主动通知用户能力。可暴露给 loop prompt 的
 
 Realtime prompt 不注入 MCP tools。runtime status/config/loop 管理工具已从 schema、handler、CoreRuntime Agent-facing surface 中移除。
 
-## 7. runtime.json
+## 8. runtime.json
 
 `configs/runtime/runtime.json` 热加载。Loop 示例：
 
@@ -142,7 +159,7 @@ Realtime prompt 不注入 MCP tools。runtime status/config/loop 管理工具已
 
 `permissions` 不再用于 Agent prompt 或 MCP runtime 写配置流程；优先从 runtime 文件中移除。
 
-## 8. 开发检查
+## 9. 开发检查
 
 常用检查：
 

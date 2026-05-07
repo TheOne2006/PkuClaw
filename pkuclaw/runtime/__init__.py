@@ -1,6 +1,5 @@
-"""Runtime package.
+"""Runtime bootstrap and hot-loaded editable runtime file readers.
 
-Import concrete bootstrap helpers from :mod:`pkuclaw.runtime.bootstrap`.
-Keeping this package initializer empty avoids an extra re-export layer in the
-startup path.
+This package owns Python code that reads files under ``configs/runtime/``:
+``runtime.json``, ``events.json``, ``prompts.json`` and the skill catalog.
 """

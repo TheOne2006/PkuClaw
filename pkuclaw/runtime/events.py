@@ -8,7 +8,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Mapping
 
-from pkuclaw.code_agents.subskills import normalize_skill_name
+from pkuclaw.runtime.skills import normalize_skill_name
 
 
 RUNTIME_EVENTS_FILE = "events.json"

@@ -88,3 +88,7 @@ python -m unittest discover
 ```
 
 See `ARCHITECTURE.md`, `docs/DEVELOPMENT.zh.md`, and `configs/runtime/README.md` for more details.
+
+Code layout rule of thumb: `pkuclaw/core/` owns run orchestration,
+`pkuclaw/runtime/` owns hot-loaded runtime file readers, `pkuclaw/agents/`
+owns Agent execution/providers, and `pkuclaw/channels/` owns platform adapters.

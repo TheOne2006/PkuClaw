@@ -14,8 +14,6 @@ from .schema import (
     duration_text,
     final_status_label,
     markdown_block,
-    metadata_block,
-    section_title,
     strip_markdown_noise,
 )
 
@@ -102,28 +100,26 @@ class FeishuCardRenderer:
         event_text = "\n".join(page_events) or "没有记录到 Codex 事件。"
 
         elements = [
-            section_title("运行详情"),
-            metadata_block(
-                [
-                    ("状态", status),
-                    ("耗时", elapsed),
-                    ("Run", run_id[:8]),
-                    ("模式", agent_context.get("mode", "默认")),
-                    ("模型", agent_context.get("model", "默认")),
-                    ("推理", agent_context.get("reasoning", "默认")),
-                ]
-            ),
             markdown_block(
-                "**Artifacts**\n\n"
-                f"- prompt: {artifacts.get('prompt', '无')}\n"
-                f"- stdout: {artifacts.get('stdout', '无')}\n"
-                f"- stderr: {artifacts.get('stderr', '无')}\n"
-                f"- result: {artifacts.get('result', '无')}",
-                limit=900,
+                "**运行概览**\n"
+                f"- 状态：{_run_status_label(status)}\n"
+                f"- 耗时：{elapsed}\n"
+                f"- Run：{run_id[:8]}\n"
+                f"- 模型：{agent_context.get('model', '默认')} · "
+                f"推理：{agent_context.get('reasoning', '默认')}\n"
+                f"- 模式：{agent_context.get('mode', '默认')}",
+                limit=700,
                 text_size=META_TEXT_SIZE,
             ),
             markdown_block(
-                f"**Codex events · {page + 1}/{total_pages}**\n\n{event_text}",
+                "**调试文件**\n"
+                f"运行文件夹：{artifacts.get('run_dir', '无')}",
+                limit=900,
+                text_size=META_TEXT_SIZE,
+                strip_inline_code=False,
+            ),
+            markdown_block(
+                f"**Codex 事件 · {page + 1}/{total_pages}**\n\n{event_text}",
                 limit=MAX_CARD_TEXT,
                 text_size=META_TEXT_SIZE,
                 strip_inline_code=False,
@@ -153,3 +149,18 @@ class FeishuCardRenderer:
                 markdown_block(body),
             ],
         )
+
+
+def _run_status_label(status: str) -> str:
+    """把 run 状态转换为详情卡里的短中文状态。"""
+    labels = {
+        "queued": "排队中",
+        "running": "运行中",
+        "succeeded": "成功",
+        "failed": "失败",
+        "cancelled": "已取消",
+    }
+    label = labels.get(status, status or "未知")
+    if label == status:
+        return label
+    return f"{label}（{status}）"

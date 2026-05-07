@@ -1,1 +1,1 @@
-"""Core runtime models, state, controls, and dispatch helpers."""
+"""Core runtime orchestration, loop scheduling, models, and state store."""
