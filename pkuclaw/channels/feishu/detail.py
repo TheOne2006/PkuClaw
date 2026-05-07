@@ -7,7 +7,6 @@ from pkuclaw.agents.artifacts import build_codex_artifact_detail
 from pkuclaw.config import Settings
 from pkuclaw.core import logging as log
 from pkuclaw.core.runtime import CoreRuntime
-from pkuclaw.core.models import merge_agent_settings
 
 from .cards import FeishuCardKitClient, FeishuCardRenderer
 from .ids import short_id
@@ -54,29 +53,18 @@ def build_run_detail_card(
     run_id: str,
     page: int,
 ) -> dict[str, Any]:
-    """读取 Store 和 Codex artifacts，生成运行详情卡 JSON。"""
-    run = core_runtime.store.get_run(run_id)
-    detail = build_codex_artifact_detail(data_dir=settings.app.data_dir, run=run)
+    """通过统一 run detail helper 生成运行详情卡 JSON。"""
+    detail = build_codex_artifact_detail(
+        store=core_runtime.store,
+        run_id=run_id,
+    )
     return renderer.run_detail_card(
         run_id=run_id,
-        status=run.status,
+        status=detail.run.status,
         elapsed=detail.elapsed,
-        agent_context=agent_context(core_runtime, run.conversation_id),
-        artifacts=detail.artifacts,
+        agent_context=detail.agent_context,
+        paths=detail.paths,
+        artifact_summary=detail.artifact_summary,
         events=detail.events,
         page=page,
     )
-
-
-def agent_context(core_runtime: CoreRuntime, conversation_id: str) -> dict[str, str]:
-    """合并 runtime 和会话覆盖，生成详情卡展示用的 Agent 设置。"""
-    conversation = core_runtime.store.ensure_conversation(conversation_id)
-    runtime = core_runtime.runtime_config.read_snapshot()
-    settings = merge_agent_settings(runtime.agent, conversation.agent_settings)
-    mode = settings.mode or "standard"
-    return {
-        "provider": settings.provider or "codex",
-        "mode": mode,
-        "model": settings.model or "默认",
-        "reasoning": settings.reasoning_effort or "默认",
-    }

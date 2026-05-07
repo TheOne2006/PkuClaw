@@ -11,7 +11,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
-from pkuclaw.core.models import AgentSettings
+from pkuclaw.core.models import (
+    DEFAULT_AGENT_MODE,
+    DEFAULT_AGENT_MODEL,
+    DEFAULT_AGENT_PROVIDER,
+    DEFAULT_AGENT_REASONING_EFFORT,
+    AgentSettings,
+)
 
 
 def utc_now() -> str:
@@ -21,7 +27,7 @@ def utc_now() -> str:
 
 @dataclass(frozen=True)
 class Conversation:
-    """持久化会话记录和该会话的 Agent 覆盖设置。"""
+    """持久化会话记录和该会话的默认 Agent 设置。"""
     conversation_id: str
     agent_session_id: str | None
     agent_settings: AgentSettings
@@ -39,9 +45,31 @@ class RunRecord:
     user_text: str
     response_text: str | None
     result_path: str | None
+    error: str | None
     created_at: str
     updated_at: str
     finished_at: str | None
+
+
+@dataclass(frozen=True)
+class ArtifactRecord:
+    """run 产生的用户可见产物记录。"""
+    id: int
+    run_id: str
+    kind: str
+    path: str
+    title: str
+    created_at: str
+
+
+@dataclass(frozen=True)
+class RunDetailRecord:
+    """详情页使用的结构化 run 事实快照。"""
+    run: RunRecord
+    metadata: dict[str, Any]
+    agent: AgentSettings
+    paths: dict[str, str]
+    artifacts: tuple[ArtifactRecord, ...]
 
 
 @dataclass(frozen=True)
@@ -72,15 +100,21 @@ class RuntimeChangeRecord:
 
 
 class Store:
-    """SQLite 数据访问对象，封装 schema、迁移和查询更新。"""
-    def __init__(self, db_path: Path) -> None:
+    """SQLite 数据访问对象，封装 schema 和查询更新。"""
+    def __init__(
+        self,
+        db_path: Path,
+        *,
+        default_agent_settings: AgentSettings | None = None,
+    ) -> None:
         self.db_path = db_path
+        self.default_agent_settings = _complete_agent_settings(default_agent_settings)
         self._lock = threading.Lock()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.init()
 
     def init(self) -> None:
-        """创建或迁移 SQLite schema。"""
+        """创建当前 SQLite schema。"""
         with self._connect() as conn:
             # Schema lives in code so a fresh daemon can create
             # its local state without a separate migration tool.
@@ -89,10 +123,10 @@ class Store:
                 create table if not exists conversations (
                     chat_id text primary key,
                     agent_session_id text,
-                    agent_provider text,
-                    agent_mode text,
-                    agent_model text,
-                    agent_reasoning_effort text,
+                    agent_provider text not null,
+                    agent_mode text not null,
+                    agent_model text not null,
+                    agent_reasoning_effort text not null,
                     created_at text not null,
                     updated_at text not null
                 );
@@ -105,9 +139,6 @@ class Store:
                     user_text text not null,
                     response_text text,
                     result_path text,
-                    stdout_path text,
-                    stderr_path text,
-                    prompt_path text,
                     error text,
                     metadata_json text not null default '{}',
                     created_at text not null,
@@ -152,44 +183,6 @@ class Store:
                 );
                 """
             )
-            # Lightweight additive migrations keep older local databases usable
-            # while preserving user data.
-            _ensure_column(
-                conn,
-                table="conversations",
-                column="agent_provider",
-                definition="text",
-            )
-            _ensure_column(
-                conn,
-                table="conversations",
-                column="agent_mode",
-                definition="text",
-            )
-            _ensure_column(
-                conn,
-                table="conversations",
-                column="agent_model",
-                definition="text",
-            )
-            _ensure_column(
-                conn,
-                table="conversations",
-                column="agent_reasoning_effort",
-                definition="text",
-            )
-            _ensure_column(
-                conn,
-                table="conversations",
-                column="agent_session_id",
-                definition="text",
-            )
-            _ensure_column(
-                conn,
-                table="runs",
-                column="source",
-                definition="text not null default 'realtime'",
-            )
 
     def ensure_conversation(self, conversation_id: str) -> Conversation:
         """读取会话；不存在时创建一条默认会话记录。"""
@@ -199,12 +192,24 @@ class Store:
             ).fetchone()
             if row is None:
                 now = utc_now()
+                defaults = self.default_agent_settings
                 conn.execute(
                     """
-                    insert into conversations(chat_id, agent_session_id, created_at, updated_at)
-                    values (?, null, ?, ?)
+                    insert into conversations(
+                        chat_id, agent_session_id, agent_provider, agent_mode,
+                        agent_model, agent_reasoning_effort, created_at, updated_at
+                    )
+                    values (?, null, ?, ?, ?, ?, ?, ?)
                     """,
-                    (conversation_id, now, now),
+                    (
+                        conversation_id,
+                        defaults.provider,
+                        defaults.mode,
+                        defaults.model,
+                        defaults.reasoning_effort,
+                        now,
+                        now,
+                    ),
                 )
                 row = conn.execute(
                     "select * from conversations where chat_id = ?", (conversation_id,)
@@ -232,7 +237,7 @@ class Store:
         model: str | None = None,
         reasoning_effort: str | None = None,
     ) -> Conversation:
-        """更新单个会话的 Agent provider/mode/model/reasoning 覆盖。"""
+        """更新单个会话的 Agent provider/mode/model/reasoning 默认值。"""
         self.ensure_conversation(conversation_id)
         current = self.ensure_conversation(conversation_id).agent_settings
         with self._lock, self._connect() as conn:
@@ -272,69 +277,36 @@ class Store:
         now = utc_now()
         with self._lock, self._connect() as conn:
             metadata_json = json.dumps(metadata or {}, ensure_ascii=False)
-            legacy_column = _legacy_run_type_column()
-            if legacy_column in _table_columns(conn, "runs"):
-                conn.execute(
-                    f"""
-                    insert into runs(
-                        run_id, chat_id, status, source, {legacy_column},
-                        user_text, metadata_json, created_at, updated_at
-                    )
-                    values (?, ?, 'queued', ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        run_id,
-                        conversation_id,
-                        source,
-                        source,
-                        user_text,
-                        metadata_json,
-                        now,
-                        now,
-                    ),
+            conn.execute(
+                """
+                insert into runs(
+                    run_id, chat_id, status, source, user_text, metadata_json,
+                    created_at, updated_at
                 )
-            else:
-                conn.execute(
-                    """
-                    insert into runs(
-                        run_id, chat_id, status, source, user_text, metadata_json,
-                        created_at, updated_at
-                    )
-                    values (?, ?, 'queued', ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        run_id,
-                        conversation_id,
-                        source,
-                        user_text,
-                        metadata_json,
-                        now,
-                        now,
-                    ),
-                )
+                values (?, ?, 'queued', ?, ?, ?, ?, ?)
+                """,
+                (
+                    run_id,
+                    conversation_id,
+                    source,
+                    user_text,
+                    metadata_json,
+                    now,
+                    now,
+                ),
+            )
         return self.get_run(run_id)
 
-    def mark_run_running(
-        self,
-        run_id: str,
-        *,
-        prompt_path: Path,
-        stdout_path: Path,
-        stderr_path: Path,
-    ) -> None:
-        """把 run 标记为 running，并记录 prompt/stdout/stderr 路径。"""
+    def mark_run_running(self, run_id: str) -> None:
+        """把 run 标记为 running。"""
         with self._lock, self._connect() as conn:
             conn.execute(
                 """
                 update runs
-                set status = 'running', prompt_path = ?, stdout_path = ?,
-                    stderr_path = ?, updated_at = ?
+                set status = 'running', updated_at = ?
                 where run_id = ?
                 """,
                 (
-                    str(prompt_path),
-                    str(stdout_path),
-                    str(stderr_path),
                     utc_now(),
                     run_id,
                 ),
@@ -371,17 +343,34 @@ class Store:
                 (run_id, str(result_path), now),
             )
 
-    def mark_run_failed(self, run_id: str, error: str) -> None:
+    def mark_run_failed(
+        self,
+        run_id: str,
+        error: str,
+        *,
+        response_text: str | None = None,
+        result_path: Path | None = None,
+    ) -> None:
         """把 run 标记为 failed，并保存错误信息。"""
         now = utc_now()
         with self._lock, self._connect() as conn:
             conn.execute(
                 """
                 update runs
-                set status = 'failed', error = ?, updated_at = ?, finished_at = ?
+                set status = 'failed', error = ?,
+                    response_text = coalesce(?, response_text),
+                    result_path = coalesce(?, result_path),
+                    updated_at = ?, finished_at = ?
                 where run_id = ?
                 """,
-                (error, now, now, run_id),
+                (
+                    error,
+                    response_text,
+                    str(result_path) if result_path is not None else None,
+                    now,
+                    now,
+                    run_id,
+                ),
             )
 
     def update_run_metadata(self, run_id: str, metadata: dict[str, Any]) -> None:
@@ -408,11 +397,52 @@ class Store:
             ).fetchone()
         if row is None:
             raise KeyError(f"run not found: {run_id}")
-        try:
-            data = json.loads(str(row["metadata_json"] or "{}"))
-        except json.JSONDecodeError:
-            return {}
-        return data if isinstance(data, dict) else {}
+        data = json.loads(str(row["metadata_json"]))
+        if not isinstance(data, dict):
+            raise RuntimeError(f"run metadata_json must be an object: {run_id}")
+        return data
+
+    def run_artifacts(self, run_id: str) -> tuple[ArtifactRecord, ...]:
+        """读取一个 run 的用户可见产物记录。"""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                select * from artifacts
+                where run_id = ?
+                order by id asc
+                """,
+                (run_id,),
+            ).fetchall()
+        return tuple(_artifact_from_row(row) for row in rows)
+
+    def get_run_detail(self, run_id: str) -> RunDetailRecord:
+        """读取详情页所需的结构化 run 事实快照。"""
+        run = self.get_run(run_id)
+        metadata = self.get_run_metadata(run_id)
+        agent_raw = _required_metadata_object(metadata, "agent", run_id=run_id)
+        paths_raw = _required_metadata_object(metadata, "paths", run_id=run_id)
+        return RunDetailRecord(
+            run=run,
+            metadata=metadata,
+            agent=AgentSettings(
+                provider=_required_metadata_str(agent_raw, "provider", run_id=run_id),
+                mode=_required_metadata_str(agent_raw, "mode", run_id=run_id),
+                model=_required_metadata_str(agent_raw, "model", run_id=run_id),
+                reasoning_effort=_required_metadata_str(
+                    agent_raw,
+                    "reasoning_effort",
+                    run_id=run_id,
+                ),
+            ),
+            paths={
+                "run_dir": _required_metadata_str(paths_raw, "run_dir", run_id=run_id),
+                "prompt": _required_metadata_str(paths_raw, "prompt", run_id=run_id),
+                "stdout": _required_metadata_str(paths_raw, "stdout", run_id=run_id),
+                "stderr": _required_metadata_str(paths_raw, "stderr", run_id=run_id),
+                "result": _required_metadata_str(paths_raw, "result", run_id=run_id),
+            },
+            artifacts=self.run_artifacts(run_id),
+        )
 
     def record_channel_message(
         self,
@@ -573,10 +603,10 @@ def _conversation_from_row(row: sqlite3.Row) -> Conversation:
         conversation_id=str(row["chat_id"]),
         agent_session_id=row["agent_session_id"],
         agent_settings=AgentSettings(
-            provider=_optional_row_str(row["agent_provider"]),
-            mode=_optional_row_str(row["agent_mode"]),
-            model=row["agent_model"],
-            reasoning_effort=row["agent_reasoning_effort"],
+            provider=_required_row_str(row, "agent_provider"),
+            mode=_required_row_str(row, "agent_mode"),
+            model=_required_row_str(row, "agent_model"),
+            reasoning_effort=_required_row_str(row, "agent_reasoning_effort"),
         ),
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
@@ -593,9 +623,22 @@ def _run_from_row(row: sqlite3.Row) -> RunRecord:
         user_text=str(row["user_text"]),
         response_text=row["response_text"],
         result_path=row["result_path"],
+        error=row["error"],
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
         finished_at=row["finished_at"],
+    )
+
+
+def _artifact_from_row(row: sqlite3.Row) -> ArtifactRecord:
+    """把 SQLite row 转换为 ArtifactRecord。"""
+    return ArtifactRecord(
+        id=int(row["id"]),
+        run_id=str(row["run_id"]),
+        kind=str(row["kind"]),
+        path=str(row["path"]),
+        title=str(row["title"]),
+        created_at=str(row["created_at"]),
     )
 
 
@@ -628,35 +671,48 @@ def _runtime_change_from_row(row: sqlite3.Row) -> RuntimeChangeRecord:
     )
 
 
-def _optional_row_str(value: Any) -> str | None:
-    """把可空 SQLite 字段转换为可空字符串。"""
-    if value is None:
-        return None
+def _complete_agent_settings(settings: AgentSettings | None) -> AgentSettings:
+    """补齐默认 Agent 设置，确保新 conversation 字段非空。"""
+    settings = settings or AgentSettings()
+    return AgentSettings(
+        provider=settings.provider or DEFAULT_AGENT_PROVIDER,
+        mode=settings.mode or DEFAULT_AGENT_MODE,
+        model=settings.model or DEFAULT_AGENT_MODEL,
+        reasoning_effort=(
+            settings.reasoning_effort or DEFAULT_AGENT_REASONING_EFFORT
+        ),
+    )
+
+
+def _required_row_str(row: sqlite3.Row, column: str) -> str:
+    """读取当前 schema 下必须存在且非空的字符串列。"""
+    value = row[column]
+    if value is None or not str(value).strip():
+        raise RuntimeError(f"required database column is empty: {column}")
     return str(value)
 
 
-def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:
-    """Return the current column names for a SQLite table."""
-
-    rows = conn.execute(f"pragma table_info({table})").fetchall()
-    return {str(row["name"]) for row in rows}
-
-
-def _legacy_run_type_column() -> str:
-    """Return the pre-source run type column name without reintroducing it elsewhere."""
-
-    return "in" + "tent"
-
-
-def _ensure_column(
-    conn: sqlite3.Connection,
+def _required_metadata_object(
+    metadata: dict[str, Any],
+    key: str,
     *,
-    table: str,
-    column: str,
-    definition: str,
-) -> None:
-    """按需追加旧数据库缺失的列，实现轻量迁移。"""
-    existing = _table_columns(conn, table)
-    if column in existing:
-        return
-    conn.execute(f"alter table {table} add column {column} {definition}")
+    run_id: str,
+) -> dict[str, Any]:
+    """读取当前 metadata schema 下必须存在的对象字段。"""
+    value = metadata.get(key)
+    if not isinstance(value, dict):
+        raise RuntimeError(f"run metadata missing object '{key}': {run_id}")
+    return value
+
+
+def _required_metadata_str(
+    metadata: dict[str, Any],
+    key: str,
+    *,
+    run_id: str,
+) -> str:
+    """读取当前 metadata schema 下必须存在且非空的字符串字段。"""
+    value = metadata.get(key)
+    if not isinstance(value, str) or not value.strip():
+        raise RuntimeError(f"run metadata missing string '{key}': {run_id}")
+    return value.strip()

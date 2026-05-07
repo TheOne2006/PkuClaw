@@ -88,7 +88,8 @@ class FeishuCardRenderer:
         status: str,
         elapsed: str,
         agent_context: dict[str, str],
-        artifacts: dict[str, str],
+        paths: dict[str, str],
+        artifact_summary: str,
         events: list[str],
         page: int,
     ) -> dict[str, Any]:
@@ -108,7 +109,8 @@ class FeishuCardRenderer:
                 f"- 模型：{agent_context.get('model', '默认')} · "
                 f"推理：{agent_context.get('reasoning', '默认')}\n"
                 f"- 模式：{agent_context.get('mode', '默认')}\n"
-                f"- 运行文件夹：{artifacts.get('run_dir', '无')}",
+                f"- 运行文件夹：{paths.get('run_dir', '无')}\n"
+                f"- 产物：{artifact_summary}",
                 limit=1000,
                 text_size=META_TEXT_SIZE,
                 strip_inline_code=False,

@@ -276,18 +276,6 @@ class CoreRuntime:
             sink_mode=loop.sink_mode,
         )
         prepared = self.agent_wrapper.prepare(request, plan)
-        metadata: dict[str, Any] = {
-            "source": "loop",
-            "loop_id": loop.id,
-            "notify_policy": runtime.notifications.policy,
-            "sink_mode": loop.sink_mode,
-            "scheduled_at": scheduled_at,
-            "suggested_skills": list(suggested_skills),
-        }
-        if target is not None:
-            metadata["channel"] = target["channel"]
-            metadata["target"] = target
-        self.store.update_run_metadata(prepared.run_id, metadata)
         return CoreDispatch(
             reply_text=f"Loop run queued: {loop.id}.",
             run_id=prepared.run_id,

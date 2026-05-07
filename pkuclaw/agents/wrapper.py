@@ -8,7 +8,9 @@ from pkuclaw.agents.base import Agent, AgentRunContext, AgentRunPaths
 from pkuclaw.config import Settings
 from pkuclaw.core import logging as log
 from pkuclaw.core.models import (
+    DEFAULT_AGENT_MODE,
     DEFAULT_AGENT_MODEL,
+    DEFAULT_AGENT_PROVIDER,
     DEFAULT_AGENT_REASONING_EFFORT,
     AgentEventSink,
     AgentResult,
@@ -65,14 +67,7 @@ class AgentWrapper:
             conversation_id=request.conversation_id,
             user_text=request.text,
             source=request.source,
-            metadata={
-                "source": request.source,
-                "channel": request.channel,
-                "sender_id": request.sender_id,
-                "suggested_skills": list(request.suggested_skills),
-                "channel_context": request.channel_context,
-                "sink_mode": request.sink_mode,
-            },
+            metadata=_request_metadata(request),
         )
         log.event(
             "AgentWrapper prepared run: "
@@ -93,40 +88,31 @@ class AgentWrapper:
 
         run = self.store.get_run(run_id)
         context = self._build_context(run=run, request=request, plan=plan)
-        prompt = self.build_run_prompt(context)
-
-        context.paths.run_dir.mkdir(parents=True, exist_ok=True)
-        context.paths.prompt_path.write_text(prompt, encoding="utf-8")
-        self.store.mark_run_running(
-            run_id,
-            prompt_path=context.paths.prompt_path,
-            stdout_path=context.paths.stdout_path,
-            stderr_path=context.paths.stderr_path,
-        )
         self.store.update_run_metadata(
             run_id,
-            {
-                "runtime_config": str(context.runtime.path),
-                "runtime_warnings": list(context.warnings),
-                "provider": context.agent_settings.provider,
-                "mode": context.agent_settings.mode,
-                "model": context.agent_settings.model,
-                "reasoning_effort": context.agent_settings.reasoning_effort,
-                "run_dir": str(context.paths.run_dir),
-            },
-        )
-        log.ok(
-            "AgentWrapper prompt ready: "
-            f"run={run_id}, provider={context.agent_settings.provider}, "
-            f"chars={len(prompt)}, prompt={context.paths.prompt_path}"
+            _execution_metadata(context),
         )
 
         try:
+            prompt = self.build_run_prompt(context)
+            context.paths.run_dir.mkdir(parents=True, exist_ok=True)
+            context.paths.prompt_path.write_text(prompt, encoding="utf-8")
+            self.store.mark_run_running(run_id)
+            log.ok(
+                "AgentWrapper prompt ready: "
+                f"run={run_id}, provider={context.agent_settings.provider}, "
+                f"chars={len(prompt)}, prompt={context.paths.prompt_path}"
+            )
             agent = self._select_agent(context.agent_settings)
             result = agent.execute(context, prompt, sink)
         except Exception as exc:
             error = str(exc)
-            self.store.mark_run_failed(run_id, error)
+            self.store.mark_run_failed(
+                run_id,
+                error,
+                response_text=error,
+                result_path=context.paths.result_path,
+            )
             log.fail(f"AgentWrapper run failed: run={run_id}, error={error}")
             raise
 
@@ -138,7 +124,13 @@ class AgentWrapper:
                 session_id=result.session_id,
             )
         else:
-            self.store.mark_run_failed(run_id, result.error or result.response_text)
+            error = result.error or result.response_text
+            self.store.mark_run_failed(
+                run_id,
+                error,
+                response_text=result.response_text,
+                result_path=result.result_path,
+            )
         return result
 
     def _build_context(
@@ -307,3 +299,65 @@ def _notification_script_text() -> str:
         f"Read `configs/runtime/skills/{NOTIFICATION_SKILL_NAME}` and call the "
         "documented queue-based Python script."
     )
+
+
+def _request_metadata(request: AgentRunRequest) -> dict[str, object]:
+    """Build the queued-run structured metadata from the normalized request."""
+
+    channel_context = dict(request.channel_context)
+    return {
+        "source": request.source,
+        "channel": {
+            "name": request.channel,
+            "sender_id": request.sender_id,
+            "target": channel_context.get("target"),
+            "event_id": channel_context.get("event_id"),
+        },
+        "loop": _loop_metadata(request, channel_context),
+        "sink_mode": request.sink_mode,
+        "suggested_skills": list(request.suggested_skills),
+    }
+
+
+def _loop_metadata(
+    request: AgentRunRequest,
+    channel_context: dict[str, object],
+) -> dict[str, object] | None:
+    """Return loop-specific metadata, or None for realtime runs."""
+
+    if request.source != "loop":
+        return None
+    return {
+        "id": channel_context.get("loop_id"),
+        "notify_policy": channel_context.get("notify_policy"),
+        "sink_mode": request.sink_mode,
+        "scheduled_at": channel_context.get("scheduled_at"),
+        "suggested_skills": list(request.suggested_skills),
+    }
+
+
+def _execution_metadata(context: AgentRunContext) -> dict[str, object]:
+    """Build the structured facts known when the run is ready to execute."""
+
+    return {
+        "agent": {
+            "provider": context.agent_settings.provider or DEFAULT_AGENT_PROVIDER,
+            "mode": context.agent_settings.mode or DEFAULT_AGENT_MODE,
+            "model": context.agent_settings.model or DEFAULT_AGENT_MODEL,
+            "reasoning_effort": (
+                context.agent_settings.reasoning_effort
+                or DEFAULT_AGENT_REASONING_EFFORT
+            ),
+        },
+        "paths": {
+            "run_dir": str(context.paths.run_dir),
+            "prompt": str(context.paths.prompt_path),
+            "stdout": str(context.paths.stdout_path),
+            "stderr": str(context.paths.stderr_path),
+            "result": str(context.paths.result_path),
+        },
+        "runtime": {
+            "config": str(context.runtime.path),
+            "warnings": list(context.warnings),
+        },
+    }

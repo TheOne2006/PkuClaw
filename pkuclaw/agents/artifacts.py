@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from pkuclaw.core.store import RunRecord
+from pkuclaw.core.store import ArtifactRecord, RunRecord, Store
 
 
 _CODEX_EVENT_LABELS = {
@@ -24,32 +24,40 @@ _CODEX_EVENT_LABELS = {
 @dataclass(frozen=True)
 class AgentArtifactDetail:
     """运行详情卡所需的耗时、产物路径和 Codex 事件摘要。"""
+    run: RunRecord
     elapsed: str
-    artifacts: dict[str, str]
+    agent_context: dict[str, str]
+    paths: dict[str, str]
+    artifact_summary: str
+    artifacts: tuple[ArtifactRecord, ...]
     events: list[str]
 
 
 def build_codex_artifact_detail(
     *,
-    data_dir: Path,
-    run: RunRecord,
+    store: Store,
+    run_id: str,
 ) -> AgentArtifactDetail:
-    """根据 run 记录定位 Codex artifacts 并生成详情摘要。"""
-    run_dir = data_dir / "agent_runs" / "codex" / run.run_id
-    prompt_path = run_dir / "prompt.md"
-    stdout_path = run_dir / "stdout.jsonl"
-    stderr_path = run_dir / "stderr.log"
-    result_path = Path(run.result_path) if run.result_path else run_dir / "result.md"
+    """读取结构化 run detail，并生成详情卡展示摘要。"""
+    detail = store.get_run_detail(run_id)
+    run = detail.run
+    paths = {
+        key: _artifact_label(Path(value))
+        for key, value in detail.paths.items()
+    }
     return AgentArtifactDetail(
+        run=run,
         elapsed=_run_elapsed(run.created_at, run.finished_at),
-        artifacts={
-            "run_dir": _artifact_label(run_dir),
-            "prompt": _artifact_label(prompt_path),
-            "stdout": _artifact_label(stdout_path),
-            "stderr": _artifact_label(stderr_path),
-            "result": _artifact_label(result_path),
+        agent_context={
+            "provider": str(detail.agent.provider),
+            "mode": str(detail.agent.mode),
+            "model": str(detail.agent.model),
+            "reasoning": str(detail.agent.reasoning_effort),
         },
-        events=codex_trace_events(stdout_path),
+        paths=paths,
+        artifact_summary=_artifact_summary(detail.artifacts),
+        artifacts=detail.artifacts,
+        events=codex_trace_events(Path(detail.paths["stdout"])),
     )
 
 
@@ -74,6 +82,16 @@ def _artifact_label(path: Path) -> str:
     if path.exists():
         return str(path)
     return f"{path} (missing)"
+
+
+def _artifact_summary(artifacts: tuple[ArtifactRecord, ...]) -> str:
+    """把用户可见产物记录压缩成详情卡摘要。"""
+    if not artifacts:
+        return "无"
+    return "；".join(
+        f"{artifact.title}（{artifact.kind}）"
+        for artifact in artifacts
+    )
 
 
 def _codex_trace_line(line: str) -> str:

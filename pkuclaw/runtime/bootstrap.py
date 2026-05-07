@@ -114,8 +114,8 @@ def build_core_runtime_services(
 ) -> CoreRuntimeServices:
     """Construct daemon-owned Store/config/wrapper/CoreRuntime/executors."""
 
-    store = _open_store(settings)
     runtime_config = RuntimeConfigStore(settings.app.runtime_config_dir)
+    store = _open_store(settings, runtime_config=runtime_config)
     agent_wrapper = AgentWrapper(
         settings=settings,
         store=store,
@@ -191,10 +191,13 @@ def _start_notify_queue_thread(
     return worker, thread
 
 
-def _open_store(settings: Settings) -> Store:
+def _open_store(settings: Settings, *, runtime_config: RuntimeConfigStore) -> Store:
     """打开 SQLite Store 并输出当前状态摘要。"""
     log.stage("Opening local state store")
-    store = Store(settings.app.data_dir / "pkuclaw.db")
+    store = Store(
+        settings.app.data_dir / "pkuclaw.db",
+        default_agent_settings=runtime_config.read_snapshot().agent,
+    )
     log.ok(
         "State store ready: "
         f"conversations={store.active_conversation_count()}, "

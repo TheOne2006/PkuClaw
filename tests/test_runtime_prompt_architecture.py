@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 
+from pkuclaw.agents.artifacts import build_codex_artifact_detail
 from pkuclaw.agents.providers.codex import CodexAgent
 from pkuclaw.agents.wrapper import AgentWrapper
 from pkuclaw.channels.base import (
@@ -23,7 +25,7 @@ from pkuclaw.config import (
     NotifyQueueConfig,
     Settings,
 )
-from pkuclaw.core.models import AgentRunRequest, AgentSettings, TaskPlan
+from pkuclaw.core.models import AgentResult, AgentRunRequest, AgentSettings, TaskPlan
 from pkuclaw.core.store import Store
 from pkuclaw.notify_queue.worker import NotifyQueueWorker
 from pkuclaw.runtime.config import (
@@ -74,10 +76,14 @@ def _settings(data_dir: Path, runtime_dir: Path) -> Settings:
 
 
 def _wrapper(tmp: Path) -> AgentWrapper:
+    runtime_config = RuntimeConfigStore(ROOT / "configs" / "runtime")
     return AgentWrapper(
         settings=_settings(tmp / "data", ROOT / "configs" / "runtime"),
-        store=Store(tmp / "pkuclaw.db"),
-        runtime_config=RuntimeConfigStore(ROOT / "configs" / "runtime"),
+        store=Store(
+            tmp / "pkuclaw.db",
+            default_agent_settings=runtime_config.read_snapshot().agent,
+        ),
+        runtime_config=runtime_config,
         repo_root=ROOT,
     )
 
@@ -203,8 +209,8 @@ class PromptArchitectureTests(unittest.TestCase):
 
         self.assertIn("# PkuClaw Loop Task", prompt)
         self.assertIn("## Notification Policy", prompt)
-        self.assertIn("每次 loop 完成都发送简洁通知", prompt)
-        self.assertEqual(prompt.count("每次 loop 完成都发送简洁通知"), 1)
+        self.assertIn("只在重要变化或需要用户处理时通知", prompt)
+        self.assertEqual(prompt.count("只在重要变化或需要用户处理时通知"), 1)
         self.assertIn("## Notification Script Skill", prompt)
         self.assertIn(NOTIFICATION_SKILL_NAME, prompt)
         self.assertNotIn("channel_send_text", prompt)
@@ -395,6 +401,218 @@ class RuntimeConfigTests(unittest.TestCase):
             },
         )
         self.assertEqual(overridden.agent_request.channel, "feishu")
+
+
+class StoreModelTests(unittest.TestCase):
+    def test_new_conversation_persists_default_agent_settings(self) -> None:
+        defaults = AgentSettings(
+            provider="codex",
+            mode="fixed",
+            model="gpt-db-default",
+            reasoning_effort="high",
+        )
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            db_path = Path(raw_tmp) / "pkuclaw.db"
+            store = Store(db_path, default_agent_settings=defaults)
+            conversation = store.ensure_conversation("chat-1")
+
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            columns = {
+                row["name"]: row["notnull"]
+                for row in conn.execute("pragma table_info(conversations)")
+            }
+            run_columns = {
+                row["name"]
+                for row in conn.execute("pragma table_info(runs)")
+            }
+
+        self.assertEqual(conversation.agent_settings, defaults)
+        self.assertEqual(columns["agent_provider"], 1)
+        self.assertEqual(columns["agent_mode"], 1)
+        self.assertEqual(columns["agent_model"], 1)
+        self.assertEqual(columns["agent_reasoning_effort"], 1)
+        self.assertNotIn("prompt_path", run_columns)
+        self.assertNotIn("stdout_path", run_columns)
+        self.assertNotIn("stderr_path", run_columns)
+
+    def test_run_metadata_records_structured_runtime_facts(self) -> None:
+        class NullSink:
+            def emit(self, event: object) -> None:
+                return None
+
+        class FakeAgent:
+            name = "codex"
+
+            def execute(self, context: object, prompt: str, sink: object) -> AgentResult:
+                paths = context.paths  # type: ignore[attr-defined]
+                paths.stdout_path.write_text(
+                    json.dumps({"type": "turn.completed"}) + "\n",
+                    encoding="utf-8",
+                )
+                paths.result_path.write_text("完成", encoding="utf-8")
+                return AgentResult(
+                    run_id=context.run.run_id,  # type: ignore[attr-defined]
+                    status="succeeded",
+                    response_text="完成",
+                    session_id="session-1",
+                    result_path=paths.result_path,
+                )
+
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmp = Path(raw_tmp)
+            wrapper = _wrapper(tmp)
+            wrapper._codex = FakeAgent()  # noqa: SLF001 - inject fake provider
+            request = AgentRunRequest(
+                source="realtime",
+                conversation_id="chat-structured",
+                text="你好",
+                suggested_skills=(),
+                channel="feishu",
+                sender_id="ou-user",
+                channel_context={
+                    "target": {
+                        "channel": "feishu",
+                        "target_type": "open_id",
+                        "target_id": "ou-user",
+                    }
+                },
+            )
+            plan = TaskPlan(suggested_skills=(), ack="ok")
+            prepared = wrapper.prepare(request, plan)
+            wrapper.run(
+                run_id=prepared.run_id,
+                request=request,
+                plan=plan,
+                sink=NullSink(),
+            )
+            metadata = wrapper.store.get_run_metadata(prepared.run_id)
+            detail = wrapper.store.get_run_detail(prepared.run_id)
+            card_detail = build_codex_artifact_detail(
+                store=wrapper.store,
+                run_id=prepared.run_id,
+            )
+
+        self.assertEqual(metadata["source"], "realtime")
+        self.assertEqual(metadata["loop"], None)
+        self.assertEqual(metadata["channel"]["name"], "feishu")
+        self.assertEqual(metadata["channel"]["sender_id"], "ou-user")
+        self.assertIn("agent", metadata)
+        self.assertIn("paths", metadata)
+        self.assertNotIn("provider", metadata)
+        self.assertNotIn("model", metadata)
+        self.assertNotIn("run_dir", metadata)
+        self.assertEqual(detail.agent.model, "gpt-5.5")
+        self.assertTrue(detail.paths["stdout"].endswith("stdout.jsonl"))
+        self.assertEqual(card_detail.agent_context["model"], "gpt-5.5")
+        self.assertIn("回合完成", "\n".join(card_detail.events))
+
+    def test_loop_run_metadata_uses_structured_loop_and_channel_objects(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmp = Path(raw_tmp)
+            runtime_dir = tmp / "runtime"
+            runtime_dir.mkdir()
+            (runtime_dir / "runtime.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "notifications": {
+                            "policy": "always",
+                            "default_channel": "feishu",
+                            "default_target_type": "chat_id",
+                            "default_target_id": "oc-loop",
+                        },
+                        "loops": [
+                            {
+                                "id": "structured_loop",
+                                "enabled": True,
+                                "prompt": "check",
+                                "sink_mode": "silent",
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            runtime_config = RuntimeConfigStore(runtime_dir)
+            wrapper = AgentWrapper(
+                settings=_settings(tmp / "data", runtime_dir),
+                store=Store(
+                    tmp / "pkuclaw.db",
+                    default_agent_settings=runtime_config.read_snapshot().agent,
+                ),
+                runtime_config=runtime_config,
+                repo_root=ROOT,
+            )
+            dispatch = _core_runtime(wrapper).create_loop_run(
+                loop_id="structured_loop",
+                scheduled_at="2026-05-07T00:00:00+00:00",
+            )
+            metadata = wrapper.store.get_run_metadata(str(dispatch.run_id))
+
+        self.assertEqual(metadata["source"], "loop")
+        self.assertEqual(metadata["loop"]["id"], "structured_loop")
+        self.assertEqual(metadata["loop"]["notify_policy"], "always")
+        self.assertEqual(metadata["loop"]["scheduled_at"], "2026-05-07T00:00:00+00:00")
+        self.assertEqual(metadata["channel"]["name"], "feishu")
+        self.assertEqual(metadata["channel"]["target"]["target_id"], "oc-loop")
+        self.assertNotIn("loop_id", metadata)
+        self.assertNotIn("target", metadata)
+
+    def test_failed_run_keeps_error_response_and_result_path_for_detail(self) -> None:
+        class NullSink:
+            def emit(self, event: object) -> None:
+                return None
+
+        class FailingAgent:
+            name = "codex"
+
+            def execute(self, context: object, prompt: str, sink: object) -> AgentResult:
+                paths = context.paths  # type: ignore[attr-defined]
+                paths.stdout_path.write_text(
+                    json.dumps({"type": "item.failed"}) + "\n",
+                    encoding="utf-8",
+                )
+                paths.result_path.write_text("失败摘要", encoding="utf-8")
+                return AgentResult(
+                    run_id=context.run.run_id,  # type: ignore[attr-defined]
+                    status="failed",
+                    response_text="失败摘要",
+                    session_id=None,
+                    result_path=paths.result_path,
+                    error="执行失败",
+                )
+
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            wrapper = _wrapper(Path(raw_tmp))
+            wrapper._codex = FailingAgent()  # noqa: SLF001 - inject fake provider
+            request = AgentRunRequest(
+                source="realtime",
+                conversation_id="chat-failed",
+                text="失败测试",
+                suggested_skills=(),
+            )
+            plan = TaskPlan(suggested_skills=(), ack="ok")
+            prepared = wrapper.prepare(request, plan)
+            wrapper.run(
+                run_id=prepared.run_id,
+                request=request,
+                plan=plan,
+                sink=NullSink(),
+            )
+            wrapper.store.mark_run_failed(prepared.run_id, "outer handler failed")
+            run = wrapper.store.get_run(prepared.run_id)
+            detail = build_codex_artifact_detail(
+                store=wrapper.store,
+                run_id=prepared.run_id,
+            )
+
+        self.assertEqual(run.status, "failed")
+        self.assertEqual(run.error, "outer handler failed")
+        self.assertEqual(run.response_text, "失败摘要")
+        self.assertIsNotNone(run.result_path)
+        self.assertIn("步骤失败", "\n".join(detail.events))
 
 
 class RuntimeEventTests(unittest.TestCase):
