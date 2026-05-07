@@ -79,6 +79,22 @@ flowchart TD
   Daemon --> Channel[Registered channel backend]
 ```
 
+
+## Documentation site
+
+PkuClaw ships an Astro Starlight documentation site under `docs-site/`.
+
+```bash
+cd docs-site
+npm install
+npm run dev
+npm run build
+```
+
+GitHub Pages deployment is configured through `.github/workflows/deploy-docs.yml`.
+For the main repository, the site is built with `base: '/PkuClaw'` and deploys to
+`https://theone2006.github.io/PkuClaw/` after Pages is set to use GitHub Actions.
+
 ## Development
 
 Install the package in editable mode and run checks from the repository root:

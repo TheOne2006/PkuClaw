@@ -35,15 +35,17 @@
       "name": "pku3b/usage.md",
       "dependencies": [],
       "allowed_sources": [
-        "realtime"
+        "realtime",
+        "loop"
       ],
       "requires_confirmation": false,
-      "description": "pku3b raw-only JSON 命令、输出 envelope 和高风险命令边界；按需供 task 参考。",
+      "description": "pku3b raw-only JSON 命令、live/cache 语义、输出 envelope 和高风险命令边界；Realtime/loop 可按需参考。",
       "path": "pku3b/usage.md"
     },
     {
       "name": "tasks/sync-notices.md",
       "dependencies": [
+        "pku3b/usage.md",
         "tools/data-parser.md"
       ],
       "allowed_sources": [
@@ -51,7 +53,7 @@
         "loop"
       ],
       "requires_confirmation": false,
-      "description": "基于稳定课程快照/摘要同步课程通知、作业、DDL 和重要公告；默认只读快照并判断变化。",
+      "description": "通过 pku3b live/cache 数据同步课程通知、作业、DDL 和重要公告，并维护 PkuClaw 业务 snapshot/state。",
       "path": "tasks/sync-notices.md"
     },
     {
@@ -63,7 +65,7 @@
         "realtime"
       ],
       "requires_confirmation": true,
-      "description": "处理作业 dry-run、附件/PDF 解析和解题规划；提交或联网抓取前必须得到用户明确确认。",
+      "description": "处理作业 dry-run、附件/PDF 解析和解题规划；提交或下载大附件前必须得到用户明确确认。",
       "path": "tasks/do-homework.md"
     },
     {

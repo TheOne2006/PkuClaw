@@ -1,26 +1,37 @@
 ---
 name: pkuclaw-task-sync-notices
-description: 基于稳定课程快照同步通知、作业、DDL 和公告
+description: 通过 pku3b live/cache 数据同步课程通知、作业、DDL 和公告
 ---
 
 # 任务：同步课程通知
 
-核心原则：先读稳定快照，再做摘要和变化判断。不要让 Agent 在常规 loop 中直接驱动教学网登录、交互式 CLI 或 sub-agent。
+核心原则：**PkuClaw live 调 pku3b，pku3b 自己决定 live/network/cache；PkuClaw 只做归一化、diff、摘要和通知。**
 
-## 为什么不在 loop 中临时处理 pku3b
+## 责任边界
 
-新版 `pku3b` 已经是 raw-only JSON CLI，适合作为确定性 snapshot collector 的底层抓取工具；但常规 loop 仍不应临时处理安装、登录或凭据问题：
+- `pku3b` 是教学网访问层：负责登录 cookie、网络请求、typed cache、附件/回放 artifact cache，以及 raw JSON envelope。
+- PkuClaw 是业务层：负责把本次 pku3b 结果归一化为课程 snapshot，比较上次业务 state，并按通知策略决定是否提醒。
+- PkuClaw 不维护底层教学网页面 cache；不要根据路径或时效猜测 pku3b 是网络命中还是 cache 命中，除非 pku3b envelope/meta 明确返回。
+- loop 可以调用 pku3b 只读命令；但不要在 loop 中自动处理安装、登录、OTP、写配置、清缓存、提交作业或大附件/回放下载。
 
-- 登录、OTP、cookie 失效需要用户介入；
-- 网络、教学网状态和账号状态会让 loop 变得高噪声；
-- 安装、构建、登录和抓取都可能涉及凭据或系统依赖；
-- loop 的职责应是读取稳定快照、diff 和通知，而不是现场修复抓取环境。
+## 当前数据获取
 
-因此本 skill 默认只消费已经生成好的结构化快照。需要接入 live 抓取时，应先做一个确定性的 snapshot collector，调用 `pku3b assignments list`、`pku3b announcements list`、`pku3b timetable get` 等 raw JSON 命令并写出本 skill 约定的 `latest.json`。
+按需读取 `pku3b/usage.md`，优先调用只读 raw JSON 命令获取当前数据：
 
-## 默认数据源约定
+```bash
+pku3b assignments list --term current
+pku3b announcements list --term current
+pku3b timetable get
+pku3b videos list --term current
+```
 
-优先读取：
+语义约定：这些调用对 PkuClaw 来说都是“当前可用数据”。pku3b 可以返回真实实时网络结果，也可以命中自身 cache；需要强制绕过 pku3b typed cache 时，用户明确要求后再考虑 `pku3b --refresh <command>`。
+
+若只读命令因 sandbox/network 被阻塞，可用精确命令和目的请求一次授权。若授权被拒、`auth_required`、`otp_required`、`tool_missing`、`network_error` 或 `parse_error`，不要现场修复；把状态写入本次 snapshot/summary，并按通知策略决定是否提醒用户。
+
+## PkuClaw 本地业务文件
+
+PkuClaw 可维护以下文件作为业务状态和摘要，不作为 pku3b 的底层 cache：
 
 ```text
 data/pkuclaw/course-sync/parsed/latest.json
@@ -33,8 +44,8 @@ data/pkuclaw/course-sync/state/last.json
 ```json
 {
   "generated_at": "ISO-8601",
-  "source": "snapshot-collector | manual | pku3b-wrapper",
-  "status": "ok | partial | stale | auth_required | tool_missing | unavailable",
+  "source": "pku3b-live-cache | manual",
+  "status": "ok | partial | stale | auth_required | otp_required | tool_missing | network_error | parse_error | unavailable",
   "assignments": [
     {
       "id": "stable-id-or-empty",
@@ -49,54 +60,46 @@ data/pkuclaw/course-sync/state/last.json
   "announcements": [
     {"id": "stable-id-or-empty", "course": "课程名", "title": "公告标题", "created_at": "optional"}
   ],
+  "timetable": {},
   "errors": []
 }
 ```
 
-如果这些文件不存在，不要臆造课程状态；Realtime 中说明“还没有配置课程快照数据源”，Loop 中只有在需要用户处理时通知。
+如果 live 获取失败但旧 `latest.json` 存在，可以用旧 snapshot 作为降级答案/对比基线，但必须标注 stale/失败原因；不要臆造课程状态。
 
 ## Realtime 执行方式
 
-1. 读取 `summaries/latest.md`；没有则读 `parsed/latest.json` 并临时生成摘要。
-2. 回答用户关心的问题：本周 DDL、未完成作业、最新公告、需要优先处理的事项。
-3. 如果快照 stale/partial/auth_required/tool_missing，明确说明状态和下一步。
-4. 不提交作业，不下载附件，不自动登录教学网。
+1. 用户询问当前课程、DDL、公告或课表时，优先 live 调 pku3b 只读命令。
+2. 将 pku3b envelope 的 `data` 归一化为 `latest.json` 结构；必要时顺手更新 `parsed/latest.json` 和 `summaries/latest.md`。
+3. 回答用户关心的问题：本周 DDL、未完成作业、最新公告、需要优先处理的事项。
+4. 如果 live 获取失败，说明失败状态；可回退旧摘要/旧 snapshot，但要明确不是最新数据。
+5. 不提交作业，不自动登录/登出，不清缓存；下载附件/回放需要用户明确要求和确认。
 
 ## Loop 执行方式
 
-1. 读取 `parsed/latest.json` 和 `state/last.json`。
-2. 用 `tools/data-parser.md` 的 diff 规则判断变化。
+1. 调用 pku3b 只读命令获取本次当前数据，并归一化为 `parsed/latest.json`。
+2. 读取 `state/last.json`，用 `tools/data-parser.md` 的 diff 规则判断变化。
 3. 写回摘要到 `summaries/latest.md`；必要时更新 `state/last.json`。
 4. 没有重要变化：保持静默。
-5. 有重要变化：使用 channel notification tools 通知。
+5. 有重要变化或抓取状态需要用户处理：使用 channel notification tools 通知。
 
 ## 重要变化定义
 
 - 新增作业或 DDL 变化；
 - 24 小时内到期、逾期、状态从未完成变得更紧急；
 - 新增重要公告；
-- 快照状态变为 `auth_required`、`tool_missing`、`unavailable`；
-- 连续失败或快照明显过期。
+- 本次状态变为 `auth_required`、`otp_required`、`tool_missing`、`network_error`、`parse_error`、`unavailable`；
+- 连续失败或只能使用明显过期的旧 snapshot。
 
 ## 通知格式
 
 控制在 3-6 条要点：
 
 ```text
-PKU 课程快照有重要变化：
+PKU 课程有重要变化：
 1. 数据库概论：作业 X 24h 内截止
 2. 算法设计：新增公告 Y
 建议：今天优先处理数据库概论作业。
 ```
 
 不要输出凭据、完整日志、内部长路径或无关调试信息。
-
-## 可选：接入 live collector
-
-只有当用户明确要求“配置/调试教学网抓取”时，才读取 `pku3b/usage.md`。理想路径是实现一个独立、可测试、非交互的 collector，负责：
-
-- 调用 pku3b raw JSON 命令，例如 `assignments list`、`announcements list`、`timetable get`；
-- 统一 timeout/retry；
-- 读取 envelope 的 `ok`、`data`、`errors[*].code` 并分类；
-- 将 pku3b 的 `data` 归一化为上述 `latest.json`；
-- 不把凭据写入日志或仓库。

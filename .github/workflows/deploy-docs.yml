@@ -1,0 +1,50 @@
+name: Deploy PkuClaw Docs to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs-site/**'
+      - '.github/workflows/deploy-docs.yml'
+      - 'README.md'
+      - 'ARCHITECTURE.md'
+      - 'docs/**'
+      - 'configs/runtime/README.md'
+  workflow_dispatch:
+
+env:
+  ASTRO_TELEMETRY_DISABLED: 1
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install, build, and upload Astro site
+        uses: withastro/action@v6
+        with:
+          path: ./docs-site
+          node-version: 22
+          package-manager: npm
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

@@ -1,0 +1,76 @@
+---
+title: Runtime 设计
+description: PkuClaw 的 realtime、loop、runtime files 和 outbox 模型。
+---
+
+PkuClaw 的 runtime 模型刻意保持小：只有两类 Agent run、一个可编辑 runtime surface，以及一条 channel-neutral outbox 通知链路。
+
+## 两类 Agent run
+
+| source | 触发方式 | 行为 |
+| --- | --- | --- |
+| `realtime` | 用户消息或配置化 quick action | 直接以自然中文流式回复用户。普通消息没有预选技能，quick action 可以有 suggested skills。 |
+| `loop` | `LoopManager` 定时 tick | 执行后台任务。默认静默，仅在发现重要变化时通过 outbox 通知。 |
+
+CoreRuntime 不做自然语言意图分类。普通实时消息直接创建 `source = "realtime"`；quick action 也仍然是 realtime；loop 是唯一后台来源。
+
+## Runtime 文件目录
+
+```text
+configs/runtime/
+  runtime.json
+  events.json
+  prompts.json
+  skills.json
+  skills/
+    runtime/
+    pku3b/
+    tasks/
+    tools/
+```
+
+这些文件是 Agent 和 operator 的编辑界面，而不是隐藏在数据库里的状态。
+
+## Prompt 构建
+
+`AgentWrapper` 按 `source` 选择 prompt：
+
+- `realtime`：身份、回复规则、Skill Catalog、User Request。
+- `loop`：loop 元数据、通知策略、Channel Outbox Skill、Skill Catalog、Suggested Skills、Task。
+
+Prompt 文案来自 `configs/runtime/prompts.json`，代码只提供变量。
+
+## Channel outbox
+
+后台 loop 不直接调用飞书或网络 API，而是通过文件队列：
+
+```text
+Agent -> channel-outbox skill -> scripts/pkuclaw_outbox.py -> file queue -> daemon worker -> CoreRuntime -> channel backend
+```
+
+模型可见能力故意很少：
+
+```bash
+python scripts/pkuclaw_outbox.py text --text "..." --title "optional"
+python scripts/pkuclaw_outbox.py image --path image.png --caption "optional"
+python scripts/pkuclaw_outbox.py file --path result.pdf --caption "optional"
+```
+
+卡片渲染、资源上传、目标解析、飞书 API 调用都属于 daemon/channel backend 内部逻辑。
+
+## 通知目标解析
+
+loop 发送通知时，daemon 按顺序解析目标：
+
+1. 原始 run channel target；
+2. loop 自身 `default_channel/default_target_type/default_target_id`；
+3. 全局 `notifications.default_channel/default_target_type/default_target_id`。
+
+如果没有配置目标，发送应明确失败，而不是让 Agent 猜收件人。
+
+## 为什么这样设计？
+
+- 降低 prompt 面积，避免把完整 runtime 和 skill body 都塞给模型。
+- 保持实时任务和后台任务的行为边界清晰。
+- 让渠道适配器负责平台细节，核心 runtime 保持 channel-neutral。
+- 让 runtime 调整可以通过文件 diff、review 和版本管理完成。

@@ -27,3 +27,7 @@ Thumbs.db
 
 # Local Codex/dev worktrees
 .dev/
+# Node / Astro docs site
+docs-site/node_modules/
+docs-site/dist/
+docs-site/.astro/

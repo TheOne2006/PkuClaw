@@ -5,17 +5,18 @@ description: 解析和比较课程快照、作业、公告与 DDL 风险
 
 # 课程快照数据解析
 
-本 tool skill 的主职责不是“解析某个 CLI 的花哨输出”，而是把已有数据归一化为 PkuClaw 可稳定消费的课程快照，并比较新旧快照。
+本 tool skill 的主职责是把 pku3b raw JSON envelope 或已有课程 snapshot 归一化为 PkuClaw 可稳定消费的业务快照，并比较新旧快照。底层教学网 cache 属于 pku3b，不属于本 tool。
 
 ## 推荐输入
 
 优先处理结构化 JSON：
 
 ```text
+pku3b stdout JSON envelope
 data/pkuclaw/course-sync/parsed/latest.json
 ```
 
-如果上游暂时只能提供文本输出，先由独立 collector/wrapper 清理为 JSON，再交给 `tasks/sync-notices.md` 使用。Agent 不应在 loop 中直接依赖 ANSI/进度条文本。
+新版 pku3b 应输出 raw JSON；如果上游暂时只能提供文本输出，先清理为 JSON，再交给 `tasks/sync-notices.md` 使用。Agent 不应在 loop 中直接依赖 ANSI/进度条文本。
 
 ## 快照 schema
 
@@ -26,15 +27,17 @@ SNAPSHOT_KEYS = {
     "status",
     "assignments",
     "announcements",
+    "timetable",
     "errors",
 }
 ```
 
 字段约定：
 
-- `status`: `ok | partial | stale | auth_required | tool_missing | unavailable`
+- `status`: `ok | partial | stale | auth_required | otp_required | tool_missing | network_error | parse_error | unavailable`
 - `assignments[*].urgent_level`: `overdue | due_24h | due_7d | normal | done | unknown`
 - `due_at` 优先使用 ISO-8601；无法解析时保留 `due_text`。
+- `source` 推荐使用 `pku3b-live-cache` 表示来自 pku3b 当前可用数据；不要在 PkuClaw 侧猜测其底层是网络还是 cache。
 
 ## 基础清理函数
 
@@ -152,7 +155,7 @@ def diff_snapshot(old: dict | None, new: dict) -> dict:
         item for key, item in new_ann.items()
         if key not in old_ann
     ]
-    bad_status = new.get("status") in {"auth_required", "tool_missing", "unavailable"}
+    bad_status = new.get("status") in {"auth_required", "otp_required", "tool_missing", "network_error", "parse_error", "unavailable"}
 
     return {
         "changed_assignments": changed_assignments,

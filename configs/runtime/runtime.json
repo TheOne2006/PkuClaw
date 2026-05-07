@@ -15,7 +15,7 @@
       "id": "sync_notices",
       "enabled": true,
       "interval_seconds": 1800,
-      "prompt": "增量检查 PKU 教学网课程通知、作业、DDL、公告和本地快照。优先比较 data/pkuclaw/course-sync 下的上次快照；没有重要变化则只更新本地摘要并保持静默。发现新增/变更 DDL、即将到期/逾期作业、重要公告、登录失效或工具缺失等需要用户知道的情况时，使用 Channel Outbox Skill 中的文件队列脚本发送简洁通知。不要提交作业，不要下载大附件，缺少凭据或需要交互登录时说明需要用户处理。",
+      "prompt": "增量检查 PKU 教学网课程通知、作业、DDL 和公告。优先按 pku3b/usage.md 调用 pku3b 只读 live 命令获取当前数据；pku3b 负责网络访问和自身 cache，PkuClaw 只把本次结果归一化为课程 snapshot，并与 data/pkuclaw/course-sync 下的上次业务 state/summary 比较。没有重要变化则只更新本地摘要和 state 并保持静默。发现新增/变更 DDL、即将到期/逾期作业、重要公告、登录失效、授权被拒或工具缺失等需要用户知道的情况时，使用 Channel Outbox Skill 中的文件队列脚本发送简洁通知。不要登录/登出，不要提交作业，不要清缓存，不要下载大附件或回放，缺少凭据或需要交互登录时说明需要用户处理。",
       "skill_names": [
         "tasks/sync-notices.md"
       ],

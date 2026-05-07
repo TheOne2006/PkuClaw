@@ -1,0 +1,68 @@
+:root {
+  --sl-color-accent-low: #321215;
+  --sl-color-accent: #c41e24;
+  --sl-color-accent-high: #ffd7bd;
+  --sl-color-white: #fff8f2;
+  --sl-font: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --sl-font-mono: "SFMono-Regular", "JetBrains Mono", "Fira Code", Consolas, monospace;
+}
+
+:root[data-theme='light'] {
+  --sl-color-accent-low: #ffe8de;
+  --sl-color-accent: #9d1016;
+  --sl-color-accent-high: #43090b;
+}
+
+[data-has-hero] .page {
+  background:
+    radial-gradient(circle at 20% 12%, rgba(196, 30, 36, 0.22), transparent 34rem),
+    radial-gradient(circle at 78% 18%, rgba(212, 160, 90, 0.18), transparent 30rem),
+    linear-gradient(180deg, rgba(196, 30, 36, 0.08), transparent 44rem);
+}
+
+.hero {
+  padding-block: clamp(3rem, 10vw, 7rem);
+}
+
+.hero img,
+.hero svg {
+  filter: drop-shadow(0 2rem 5rem rgba(196, 30, 36, 0.35));
+}
+
+.sl-markdown-content .pkuclaw-kicker {
+  display: inline-flex;
+  gap: 0.5rem;
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--sl-color-accent), transparent 62%);
+  border-radius: 999px;
+  padding: 0.35rem 0.7rem;
+  background: color-mix(in srgb, var(--sl-color-accent-low), transparent 45%);
+  color: var(--sl-color-accent-high);
+  font-size: 0.88rem;
+  font-weight: 700;
+}
+
+.sl-markdown-content .pkuclaw-band {
+  margin-block: 2rem;
+  border: 1px solid var(--sl-color-gray-5);
+  border-radius: 1.25rem;
+  padding: clamp(1rem, 3vw, 1.5rem);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--sl-color-accent-low), transparent 55%), transparent);
+}
+
+.sl-markdown-content .pkuclaw-steps {
+  display: grid;
+  gap: 0.75rem;
+  margin-block: 1.25rem;
+}
+
+.sl-markdown-content .pkuclaw-step {
+  border-left: 3px solid var(--sl-color-accent);
+  padding: 0.8rem 1rem;
+  border-radius: 0.75rem;
+  background: var(--sl-color-gray-6);
+}
+
+.sl-markdown-content .pkuclaw-muted {
+  color: var(--sl-color-gray-2);
+}

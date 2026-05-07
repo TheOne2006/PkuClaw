@@ -1,0 +1,79 @@
+---
+title: PkuClaw
+description: 面向 PKU workflow 的轻量 study-agent runtime。
+template: splash
+hero:
+  title: PkuClaw
+  tagline: 面向 PKU workflow 的轻量 study-agent runtime。把实时消息、后台循环、运行时配置和通知渠道组织成可维护的 Agent 系统。
+  image:
+    alt: PkuClaw mark
+    html: |
+      <svg width="260" height="260" viewBox="0 0 260 260" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <defs>
+          <linearGradient id="pkuclaw-g" x1="40" y1="28" x2="222" y2="232" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#C41E24"/>
+            <stop offset="0.55" stop-color="#D4A05A"/>
+            <stop offset="1" stop-color="#E8B87D"/>
+          </linearGradient>
+          <filter id="pkuclaw-blur" x="-30%" y="-30%" width="160%" height="160%">
+            <feGaussianBlur stdDeviation="18"/>
+          </filter>
+        </defs>
+        <circle cx="130" cy="130" r="108" fill="url(#pkuclaw-g)" opacity="0.22" filter="url(#pkuclaw-blur)"/>
+        <rect x="42" y="42" width="176" height="176" rx="46" fill="url(#pkuclaw-g)"/>
+        <path d="M83 153C103 104 145 78 176 86C151 104 137 125 134 151C151 140 171 137 193 145C168 163 151 184 142 214C127 195 110 185 91 184C76 183 68 169 83 153Z" fill="#FFF5F0"/>
+        <path d="M86 152C106 126 129 112 154 109" stroke="#3A080A" stroke-opacity="0.22" stroke-width="10" stroke-linecap="round"/>
+      </svg>
+  actions:
+    - text: 快速开始
+      link: /PkuClaw/quickstart/
+      icon: right-arrow
+      variant: primary
+    - text: 在 GitHub 上查看
+      link: https://github.com/TheOne2006/PkuClaw
+      icon: external
+      variant: minimal
+---
+
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+<div class="pkuclaw-kicker">⚡ realtime + loop + channel outbox</div>
+
+## PkuClaw 是什么？
+
+PkuClaw 是一个 daemon-centered 的 study-agent runtime。它把用户实时消息、定时后台检查、可编辑 runtime 文件、技能目录和渠道通知统一进一套小而清晰的运行模型里。
+
+它当前聚焦 PKU 学习工作流：课程通知、作业与 DDL 汇总、教学网更新检查、后台重要事项提醒，以及后续可扩展的学习任务自动化。
+
+<CardGrid stagger>
+  <Card title="两类 Agent run" icon="rocket">
+    只有 `realtime` 和 `loop` 两类来源：实时任务直接回复用户，后台任务默认静默，只在重要变化时通知。
+  </Card>
+
+  <Card title="文件即 runtime" icon="seti:config">
+    `configs/runtime/` 下的 runtime、events、prompts 和 skills 都是可编辑文件，适合热更新和版本管理。
+  </Card>
+
+  <Card title="Skill Catalog" icon="open-book">
+    Prompt 只注入技能元数据，Agent 在需要时按路径读取具体 skill markdown，避免把所有实现细节塞进上下文。
+  </Card>
+
+  <Card title="渠道解耦" icon="puzzle">
+    loop 通知通过 channel-neutral outbox 文件队列进入 daemon，再由 channel backend 投递到飞书等平台。
+  </Card>
+</CardGrid>
+
+<div class="pkuclaw-band">
+  <strong>推荐阅读顺序：</strong>先跑通安装和配置，再理解 runtime 文件，最后阅读架构与开发者指南。
+</div>
+
+## 进入文档
+
+<CardGrid>
+  <LinkCard title="快速开始" href="/PkuClaw/quickstart/" description="从 clone 仓库到跑起第一个 realtime/daemon 入口。" />
+  <LinkCard title="安装" href="/PkuClaw/installation/" description="Python、uv、Codex CLI、飞书渠道等依赖准备。" />
+  <LinkCard title="配置" href="/PkuClaw/configuration/" description="启动期 TOML 与热加载 runtime JSON 的职责边界。" />
+  <LinkCard title="架构" href="/PkuClaw/architecture/" description="CoreRuntime、AgentWrapper、LoopManager 与 outbox 链路。" />
+  <LinkCard title="开发者指南" href="/PkuClaw/development/" description="代码归属、测试命令、prompt/runtime 变更检查。" />
+  <LinkCard title="参与贡献" href="/PkuClaw/contributing/" description="贡献流程、PR 前检查和文档维护规范。" />
+</CardGrid>
