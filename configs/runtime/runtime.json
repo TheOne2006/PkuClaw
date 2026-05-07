@@ -15,7 +15,7 @@
       "id": "test_loop",
       "enabled": true,
       "interval_seconds": 60,
-      "prompt": "这是一个测试 loop。请通过 channel notification tools 发送简洁文本：测试成功。优先发送到默认 notification_target；如果 notification_target 未配置、channel notification tools 不可用、发送失败或无法确认发送成功，请在项目根目录创建或更新 loop-test-failure.md，写明未成功原因、发生时间和你已尝试的检查。不要执行其他课程同步或作业相关任务。",
+      "prompt": "这是一个测试 loop。请通过 Notification Script Skill 中的脚本发送简洁文本：测试成功。优先发送到默认 notification_target；如果 notification_target 未配置、通知脚本不可用、发送失败或无法确认发送成功，请在项目根目录创建或更新 loop-test-failure.md，写明未成功原因、发生时间和你已尝试的检查。不要执行其他课程同步或作业相关任务。",
       "skill_names": [],
       "sink_mode": "silent",
       "prevent_overlap": true,

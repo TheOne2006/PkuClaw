@@ -1,13 +1,13 @@
 # PkuClaw
 
-PkuClaw is a lightweight study-agent runtime for PKU workflows. It normalizes user messages and scheduled background checks into Agent runs, keeps runtime configuration in editable files, and uses channel notification tools when background loops need to notify the user.
+PkuClaw is a lightweight study-agent runtime for PKU workflows. It normalizes user messages and scheduled background checks into Agent runs, keeps runtime configuration in editable files, and uses notification scripts when background loops need to notify the user.
 
 ## Current architecture
 
 PkuClaw has exactly two Agent run sources:
 
 - `realtime`: triggered by a user message or a configured quick action. The Agent receives a minimal prompt and should answer the user directly in natural Chinese.
-- `loop`: triggered by `LoopManager`. The Agent runs a configured background task, stays silent by default, and uses channel notification tools only when it finds important changes.
+- `loop`: triggered by `LoopManager`. The Agent runs a configured background task, stays silent by default, and uses the notification script skill only when it needs to notify the user.
 
 Runtime files are ordinary files under `configs/runtime/`:
 
@@ -20,13 +20,13 @@ configs/runtime/
   skills/               # runtime skill markdown files
 ```
 
-Agents may read and edit these files directly when the task calls for it. Runtime config is not managed through MCP tools.
+Agents may read and edit these files directly when the task calls for it.
 
 ## Realtime quick actions
 
 `configs/runtime/events.json` defines PkuClaw-owned event ids for user-triggered streaming realtime tasks, such as checking course updates or weekly DDLs. Channel adapters may map platform menu keys to these ids, or pass through keys that are already PkuClaw ids. UI-only channel events stay in the channel layer.
 
-A quick action creates `source=realtime` with `task` as the user request and `skill_names` as suggested skills. It does not create a loop and does not use MCP notification tools.
+A quick action creates `source=realtime` with `task` as the user request and `skill_names` as suggested skills. It does not create a loop and does not use notification scripts.
 
 ## Skills
 
@@ -49,20 +49,18 @@ Skill markdown bodies are not injected by default. Ordinary realtime runs start 
 
 Realtime and loop prompt wording is hot-read from `configs/runtime/prompts.json`.
 AgentWrapper only supplies runtime variables such as the Skill Catalog, User Request,
-loop metadata, and channel notification tool list. To adjust the assistant identity,
+loop metadata, and notification script skill hint. To adjust the assistant identity,
 rules, objective, suggested skill section, or loop notification wording, edit
 `prompts.json` instead of code.
 
-## MCP scope
+## Notification queue
 
-MCP is reserved for loop-initiated user notifications. The available tools are:
+Loop-initiated user notifications go through a runtime skill and a file-backed daemon queue:
 
-- `channel_send_text`
-- `channel_send_card`
-- `channel_send_image`
-- `channel_update_card`
+- `configs/runtime/skills/tools/channel-notifier.md`
+- `scripts/pkuclaw_notify.py`
 
-Realtime prompts do not include MCP tools. Runtime read/write management tools are not exposed.
+The script writes a random JSON job under the shared notification queue. The daemon scans the queue about every 5 seconds, resolves targets, renders standard cards, and sends through the registered channel backend. Realtime prompts do not include notification scripts.
 
 ## Runtime flow
 
@@ -75,7 +73,10 @@ flowchart TD
   RuntimeFiles[configs/runtime/runtime.json + events.json + prompts.json + skills.json + skills/**] --> Wrapper
   Wrapper --> Agent[Codex Agent]
   Agent --> Reply[Realtime reply]
-  Agent --> Notify[Loop channel notification tools]
+  Agent --> Script[Loop notification queue script]
+  Script --> Queue[File notification queue]
+  Queue --> Daemon[Daemon queue worker]
+  Daemon --> Channel[Registered channel backend]
 ```
 
 ## Development
@@ -83,7 +84,7 @@ flowchart TD
 Install the package in editable mode and run checks from the repository root:
 
 ```bash
-python -m compileall pkuclaw
+python -m compileall pkuclaw scripts
 python -m unittest discover
 ```
 

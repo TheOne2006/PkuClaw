@@ -2,16 +2,16 @@
 from __future__ import annotations
 
 import json
+import os
 import queue
 import subprocess
 import threading
 import time
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlencode
 
 from pkuclaw.agents.base import AgentRunContext
-from pkuclaw.config import Settings
+from pkuclaw.config import Settings, resolve_notify_queue_dir
 from pkuclaw.core import logging as log
 from pkuclaw.core.models import (
     DEFAULT_AGENT_MODEL,
@@ -24,7 +24,7 @@ from pkuclaw.core.models import (
 
 
 CODEX_APPROVAL_REVIEWER = "auto_review"
-CODEX_MCP_DEFAULT_TOOLS_APPROVAL_MODE = "auto"
+CODEX_APPROVAL_POLICY = "on-request"
 
 
 class CodexAgent:
@@ -83,8 +83,6 @@ class CodexAgent:
             result_path=paths.result_path,
             agent_settings=agent_settings,
             runtime=context.runtime,
-            enable_mcp=context.request.source == "loop",
-            mcp_loop_id=_mcp_loop_id(context),
         )
         mode = "resume" if context.conversation.agent_session_id else "new"
         log.stage(
@@ -107,6 +105,7 @@ class CodexAgent:
                 timeout_seconds=self._effective_timeout(context.runtime),
                 sink=sink,
                 run_id=run.run_id,
+                env_overrides=self._loop_notification_env(context),
             )
         except subprocess.TimeoutExpired as exc:
             stdout = _timeout_output(exc)
@@ -202,6 +201,7 @@ class CodexAgent:
         timeout_seconds: int,
         sink: AgentEventSink,
         run_id: str,
+        env_overrides: dict[str, str] | None = None,
     ) -> tuple[str, int]:
         """启动 Codex CLI 并实时消费 stdout JSONL，转发为 AgentEvent。"""
         stdout_lines: list[str] = []
@@ -217,6 +217,7 @@ class CodexAgent:
                 text=True,
                 cwd=self.repo_root,
                 bufsize=1,
+                env=_merged_env(env_overrides),
             )
             if process.stdin is None or process.stdout is None:
                 raise RuntimeError("Codex process streams were not created")
@@ -287,16 +288,12 @@ class CodexAgent:
         result_path: Path,
         agent_settings: AgentSettings,
         runtime: Any,
-        enable_mcp: bool,
-        mcp_loop_id: str | None = None,
     ) -> list[str]:
         """根据是否已有 session 拼出 codex exec/resume 命令行。"""
         command = [self.settings.codex.bin, "exec"]
         if session_id:
             command.extend(["resume", "--json", "-o", str(result_path)])
             self._append_runtime_options(command, agent_settings)
-            if enable_mcp:
-                self._append_mcp_server(command, loop_id=mcp_loop_id)
             command.extend([session_id, "-"])
             return command
 
@@ -312,8 +309,6 @@ class CodexAgent:
             ]
         )
         self._append_runtime_options(command, agent_settings)
-        if enable_mcp:
-            self._append_mcp_server(command, loop_id=mcp_loop_id)
         command.append("-")
         return command
 
@@ -322,7 +317,7 @@ class CodexAgent:
         command: list[str],
         agent_settings: AgentSettings,
     ) -> None:
-        """把固定 model、reasoning 和 auto-review 选项追加到 Codex 命令行。"""
+        """把固定 model、reasoning 和 auto-review 审批选项追加到 Codex 命令行。"""
         model = self._effective_model(agent_settings)
         if model:
             command.extend(["-m", model])
@@ -332,29 +327,9 @@ class CodexAgent:
         command.extend(
             [
                 "-c",
+                f'approval_policy="{CODEX_APPROVAL_POLICY}"',
+                "-c",
                 f'approvals_reviewer="{CODEX_APPROVAL_REVIEWER}"',
-            ]
-        )
-
-    def _append_mcp_server(
-        self,
-        command: list[str],
-        *,
-        loop_id: str | None = None,
-    ) -> None:
-        """Expose channel notification tools to loop runs."""
-        url = f"http://{self.settings.mcp.host}:{self.settings.mcp.port}/mcp"
-        if loop_id:
-            url = f"{url}?{urlencode({'loop_id': loop_id})}"
-        command.extend(
-            [
-                "-c",
-                f'mcp_servers.pkuclaw_daemon.url="{url}"',
-                "-c",
-                (
-                    "mcp_servers.pkuclaw_daemon.default_tools_approval_mode="
-                    f'"{CODEX_MCP_DEFAULT_TOOLS_APPROVAL_MODE}"'
-                ),
             ]
         )
 
@@ -374,9 +349,22 @@ class CodexAgent:
         """合并 runtime 和启动配置后的 Codex 超时时间。"""
         return runtime.codex.timeout_seconds or self.settings.codex.timeout_seconds
 
+    def _loop_notification_env(self, context: AgentRunContext) -> dict[str, str]:
+        """Expose notification queue defaults to loop Codex processes."""
 
-def _mcp_loop_id(context: AgentRunContext) -> str | None:
-    """Return the loop id to scope MCP notification target resolution."""
+        if context.request.source != "loop":
+            return {}
+        env = {
+            "PKUCLAW_NOTIFY_QUEUE_DIR": str(resolve_notify_queue_dir(self.settings)),
+        }
+        loop_id = _loop_id(context)
+        if loop_id:
+            env["PKUCLAW_LOOP_ID"] = loop_id
+        return env
+
+
+def _loop_id(context: AgentRunContext) -> str | None:
+    """Return the loop id to scope notification target resolution."""
     if context.request.source != "loop":
         return None
     value = context.request.channel_context.get("loop_id")
@@ -385,6 +373,13 @@ def _mcp_loop_id(context: AgentRunContext) -> str | None:
     value = value.strip()
     return value or None
 
+
+def _merged_env(overrides: dict[str, str] | None) -> dict[str, str] | None:
+    """Return process env with optional overrides."""
+
+    if not overrides:
+        return None
+    return {**os.environ, **overrides}
 
 
 def _read_session_index() -> list[dict[str, Any]]:

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -18,13 +20,12 @@ from pkuclaw.config import (
     AppConfig,
     CodexConfig,
     FeishuConfig,
-    McpConfig,
+    NotifyQueueConfig,
     Settings,
 )
 from pkuclaw.core.models import AgentRunRequest, AgentSettings, TaskPlan
 from pkuclaw.core.store import Store
-from pkuclaw.mcp.schemas import list_tool_schemas, render_tool_prompt
-from pkuclaw.mcp.handlers import DaemonMcpToolHandler
+from pkuclaw.notify_queue.worker import NotifyQueueWorker
 from pkuclaw.runtime.config import (
     SUPPORTED_NOTIFY_POLICIES,
     RuntimeConfigStore,
@@ -32,7 +33,11 @@ from pkuclaw.runtime.config import (
 )
 from pkuclaw.runtime.events import read_event_catalog, resolve_channel_event_id
 from pkuclaw.runtime.prompts import read_prompt_templates, render_prompt_template
-from pkuclaw.runtime.skills import load_skill_registry, resolve_subskill_names
+from pkuclaw.runtime.skills import (
+    NOTIFICATION_SKILL_NAME,
+    load_skill_registry,
+    resolve_subskill_names,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -61,7 +66,10 @@ def _settings(data_dir: Path, runtime_dir: Path) -> Settings:
             timeout_seconds=60,
             max_concurrent_runs=1,
         ),
-        mcp=McpConfig(host="127.0.0.1", port=8765),
+        notify_queue=NotifyQueueConfig(
+            queue_dir=Path("notify_queue"),
+            scan_interval_seconds=5,
+        ),
     )
 
 
@@ -92,6 +100,7 @@ class PromptArchitectureTests(unittest.TestCase):
             ROOT / "pkuclaw" / "agents" / "providers" / "codex.py",
             ROOT / "pkuclaw" / "core" / "runtime.py",
             ROOT / "pkuclaw" / "core" / "loops.py",
+            ROOT / "pkuclaw" / "notify_queue" / "worker.py",
         ):
             self.assertTrue(path.is_file(), str(path))
 
@@ -101,6 +110,7 @@ class PromptArchitectureTests(unittest.TestCase):
             ROOT / "pkuclaw" / "runtime_prompts.py",
             ROOT / "pkuclaw" / "code_agents",
             ROOT / "pkuclaw" / "connectors" / "pku3b.py",
+            ROOT / "pkuclaw" / "notify_http",
         ):
             self.assertFalse(path.exists(), str(path))
 
@@ -128,7 +138,7 @@ class PromptArchitectureTests(unittest.TestCase):
         self.assertNotIn("你正在执行 PkuClaw 的后台周期任务", wrapper_source)
         self.assertNotIn("## Suggested Skills", wrapper_source)
 
-    def test_realtime_prompt_is_minimal_and_has_no_mcp_tools(self) -> None:
+    def test_realtime_prompt_is_minimal_and_has_no_notification_scripts(self) -> None:
         with tempfile.TemporaryDirectory() as raw_tmp:
             wrapper = _wrapper(Path(raw_tmp))
             request = AgentRunRequest(
@@ -150,8 +160,9 @@ class PromptArchitectureTests(unittest.TestCase):
         self.assertIn("## Skill Catalog", prompt)
         self.assertIn("## User Request", prompt)
         self.assertNotIn("# PkuClaw Loop Task", prompt)
-        self.assertNotIn("## Channel Notification Tools", prompt)
+        self.assertNotIn("## Notification Script Skill", prompt)
         self.assertNotIn("channel_send_text", prompt)
+        self.assertNotIn("pkuclaw_notify_text.py", prompt)
         self.assertNotIn("runtime_get_status", prompt)
         self.assertNotIn("Run ID", prompt)
         self.assertNotIn("Agent Settings", prompt)
@@ -162,7 +173,7 @@ class PromptArchitectureTests(unittest.TestCase):
         self.assertNotIn("## Suggested Skills", prompt)
         self.assertNotIn("# 任务：同步课程通知", prompt)
 
-    def test_loop_prompt_only_lists_channel_notification_tools(self) -> None:
+    def test_loop_prompt_points_to_notification_script_skill(self) -> None:
         with tempfile.TemporaryDirectory() as raw_tmp:
             wrapper = _wrapper(Path(raw_tmp))
             request = AgentRunRequest(
@@ -194,14 +205,9 @@ class PromptArchitectureTests(unittest.TestCase):
         self.assertIn("## Notification Policy", prompt)
         self.assertIn("每次 loop 完成都发送简洁通知", prompt)
         self.assertEqual(prompt.count("每次 loop 完成都发送简洁通知"), 1)
-        self.assertIn("## Channel Notification Tools", prompt)
-        for name in (
-            "channel_send_text",
-            "channel_send_card",
-            "channel_send_image",
-            "channel_update_card",
-        ):
-            self.assertIn(name, prompt)
+        self.assertIn("## Notification Script Skill", prompt)
+        self.assertIn(NOTIFICATION_SKILL_NAME, prompt)
+        self.assertNotIn("channel_send_text", prompt)
         self.assertNotIn("# PkuClaw Realtime Task", prompt)
         self.assertNotIn("runtime_get_config", prompt)
         self.assertNotIn("runtime_add_loop", prompt)
@@ -217,14 +223,11 @@ class PromptArchitectureTests(unittest.TestCase):
         for policy in SUPPORTED_NOTIFY_POLICIES:
             description = describe_notify_policy(policy)
             self.assertTrue(description)
-        tool_prompt = render_tool_prompt()
-        self.assertIn("configured default notification target", tool_prompt)
-        self.assertNotIn("每次 loop 完成都发送简洁通知", tool_prompt)
-        self.assertNotIn("Active notification policy", tool_prompt)
+        self.assertNotIn("MCP", describe_notify_policy("always"))
 
 
 class CodexCommandConfigTests(unittest.TestCase):
-    def test_loop_mcp_tool_approval_mode_uses_server_scoped_auto(self) -> None:
+    def test_codex_command_uses_on_request_auto_review_without_mcp_server(self) -> None:
         with tempfile.TemporaryDirectory() as raw_tmp:
             settings = _settings(Path(raw_tmp) / "data", ROOT / "configs" / "runtime")
             agent = CodexAgent(settings=settings, repo_root=ROOT)
@@ -234,28 +237,27 @@ class CodexCommandConfigTests(unittest.TestCase):
                 result_path=Path(raw_tmp) / "result.md",
                 agent_settings=AgentSettings(),
                 runtime=runtime,
-                enable_mcp=True,
             )
-            loop_command = agent._build_command(  # noqa: SLF001 - command contract test
-                session_id=None,
+            resume_command = agent._build_command(  # noqa: SLF001 - command contract test
+                session_id="session-test",
                 result_path=Path(raw_tmp) / "result.md",
                 agent_settings=AgentSettings(),
                 runtime=runtime,
-                enable_mcp=True,
-                mcp_loop_id="test_loop",
             )
 
         command_text = "\n".join(command)
+        resume_command_text = "\n".join(resume_command)
+        self.assertIn('approval_policy="on-request"', command)
         self.assertIn('approvals_reviewer="auto_review"', command)
-        self.assertIn(
-            'mcp_servers.pkuclaw_daemon.default_tools_approval_mode="auto"',
-            command,
-        )
-        self.assertNotIn('default_tools_approval_mode="auto_review"', command_text)
-        self.assertIn(
-            'mcp_servers.pkuclaw_daemon.url="http://127.0.0.1:8765/mcp?loop_id=test_loop"',
-            loop_command,
-        )
+        self.assertIn('approval_policy="on-request"', resume_command)
+        self.assertIn('approvals_reviewer="auto_review"', resume_command)
+        self.assertNotIn('approval_policy="never"', command_text)
+        self.assertNotIn('approval_policy="never"', resume_command_text)
+        self.assertNotIn("default_tools_approval_mode", command_text)
+        self.assertNotIn("mcp_servers", command_text)
+        self.assertNotIn("mcp_servers", resume_command_text)
+        self.assertNotIn("pkuclaw_daemon", command_text)
+        self.assertNotIn("pkuclaw_daemon", resume_command_text)
 
 
 class SkillCatalogTests(unittest.TestCase):
@@ -383,6 +385,7 @@ class RuntimeConfigTests(unittest.TestCase):
             },
         )
         self.assertEqual(inherited.agent_request.channel, "feishu")
+        self.assertIn(NOTIFICATION_SKILL_NAME, inherited.agent_request.suggested_skills)
         self.assertEqual(
             overridden.agent_request.channel_context["target"],
             {
@@ -452,41 +455,9 @@ class RuntimeEventTests(unittest.TestCase):
             self.assertIn("skill_names", item)
 
 
-class McpToolSchemaTests(unittest.TestCase):
-    def test_mcp_registry_exposes_only_channel_tools(self) -> None:
-        names = {tool["name"] for tool in list_tool_schemas()}
-        self.assertEqual(
-            names,
-            {
-                "channel_send_text",
-                "channel_send_card",
-                "channel_send_image",
-                "channel_update_card",
-            },
-        )
-        prompt = render_tool_prompt()
-        self.assertIn("channel_send_text", prompt)
-        self.assertIn("configured default notification target", prompt)
-        self.assertNotIn("target_id", prompt)
-        self.assertNotIn("runtime_get_status", prompt)
-        self.assertNotIn("runtime_update_loop", prompt)
 
-    def test_send_tools_use_fixed_default_target_schema(self) -> None:
-        tools = {tool["name"]: tool["inputSchema"] for tool in list_tool_schemas()}
-        self.assertEqual(tools["channel_send_text"]["required"], ["text"])
-        self.assertEqual(set(tools["channel_send_text"]["properties"]), {"text"})
-        self.assertFalse(tools["channel_send_text"]["additionalProperties"])
-        self.assertEqual(tools["channel_send_card"]["required"], ["card"])
-        self.assertEqual(set(tools["channel_send_card"]["properties"]), {"card"})
-        self.assertFalse(tools["channel_send_card"]["additionalProperties"])
-        self.assertEqual(tools["channel_send_image"]["required"], ["image_path"])
-        self.assertEqual(
-            set(tools["channel_send_image"]["properties"]),
-            {"image_path"},
-        )
-        self.assertFalse(tools["channel_send_image"]["additionalProperties"])
-
-    def test_mcp_send_text_uses_resolved_config_target(self) -> None:
+class NotifyQueueTests(unittest.TestCase):
+    def test_notify_queue_text_uses_resolved_config_target_and_ack(self) -> None:
         class RecordingBackend:
             channel = "feishu"
 
@@ -570,19 +541,34 @@ class McpToolSchemaTests(unittest.TestCase):
             core_runtime = _core_runtime(wrapper)
             backend = RecordingBackend()
             core_runtime.register_channel_backend(backend)
-            handler = DaemonMcpToolHandler(core_runtime=core_runtime)
-
-            result = handler.call_tool("channel_send_text", {"text": "测试成功"})
-            override_result = handler.call_tool(
-                "channel_send_text",
-                {"text": "覆盖成功"},
-                loop_id="overrides_target",
+            worker = NotifyQueueWorker(
+                queue_dir=tmp / "notify_queue",
+                scan_interval_seconds=5,
+                core_runtime=core_runtime,
+            )
+            pending = worker.pending_dir
+            pending.mkdir(parents=True)
+            (pending / "job-1.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "job_id": "job-1",
+                        "kind": "text",
+                        "loop_id": "overrides_target",
+                        "payload": {"text": "覆盖成功"},
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
             )
 
-        self.assertTrue(result.ok)
-        self.assertTrue(override_result.ok)
-        self.assertEqual(result.data["target"]["target_type"], "open_id")
-        self.assertEqual(result.data["target"]["target_id"], "ou-owner")
+            processed = worker.process_pending()
+            ack = json.loads((worker.ack_dir / "job-1.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(processed, 1)
+        self.assertTrue(ack["ok"])
+        self.assertEqual(ack["target"]["target_type"], "chat_id")
+        self.assertEqual(ack["target"]["target_id"], "oc-loop")
         self.assertIsNotNone(backend.last_text)
         target, text = backend.last_text
         self.assertEqual(text, "覆盖成功")
@@ -590,7 +576,110 @@ class McpToolSchemaTests(unittest.TestCase):
         self.assertEqual(target.target_type, "chat_id")
         self.assertEqual(target.target_id, "oc-loop")
 
-    def test_mcp_send_text_rejects_legacy_target_arguments(self) -> None:
+    def test_notify_queue_card_update_and_image_unsupported(self) -> None:
+        class RecordingBackend:
+            channel = "feishu"
+
+            def __init__(self) -> None:
+                self.updated: tuple[str, dict, int] | None = None
+
+            def send_text(self, *, target: ChannelTarget, text: str) -> ChannelOutboundResult:
+                return ChannelOutboundResult(ok=True, message="text sent", target=target)
+
+            def send_card(
+                self,
+                *,
+                target: ChannelTarget,
+                card: dict,
+            ) -> ChannelOutboundResult:
+                return ChannelOutboundResult(ok=True, message="card sent", target=target)
+
+            def send_image(
+                self,
+                *,
+                target: ChannelTarget,
+                image_path: str,
+            ) -> ChannelOutboundResult:
+                return ChannelOutboundResult(ok=True, message="image sent", target=target)
+
+            def update_card(
+                self,
+                *,
+                card_id: str,
+                card: dict,
+                sequence: int,
+            ) -> ChannelOutboundResult:
+                self.updated = (card_id, card, sequence)
+                return ChannelOutboundResult(
+                    ok=True,
+                    message="card updated",
+                    external_card_id=card_id,
+                    data={"sequence": sequence},
+                )
+
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmp = Path(raw_tmp)
+            runtime_dir = tmp / "runtime"
+            runtime_dir.mkdir()
+            (runtime_dir / "runtime.json").write_text(
+                json.dumps({"schema_version": 1, "loops": []}),
+                encoding="utf-8",
+            )
+            wrapper = AgentWrapper(
+                settings=_settings(tmp / "data", runtime_dir),
+                store=Store(tmp / "pkuclaw.db"),
+                runtime_config=RuntimeConfigStore(runtime_dir),
+                repo_root=ROOT,
+            )
+            core_runtime = _core_runtime(wrapper)
+            backend = RecordingBackend()
+            core_runtime.register_channel_backend(backend)
+            worker = NotifyQueueWorker(
+                queue_dir=tmp / "notify_queue",
+                scan_interval_seconds=5,
+                core_runtime=core_runtime,
+            )
+            pending = worker.pending_dir
+            pending.mkdir(parents=True)
+            (pending / "update.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "job_id": "update",
+                        "kind": "card_update",
+                        "payload": {
+                            "card_id": "card-1",
+                            "card": {"title": "new"},
+                            "sequence": 2,
+                        },
+                    },
+                ),
+                encoding="utf-8",
+            )
+            (pending / "image.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "job_id": "image",
+                        "kind": "image",
+                        "payload": {"image_path": "/tmp/image.png"},
+                    },
+                ),
+                encoding="utf-8",
+            )
+
+            processed = worker.process_pending()
+            update_ack = json.loads((worker.ack_dir / "update.json").read_text())
+            image_ack = json.loads((worker.ack_dir / "image.json").read_text())
+
+        self.assertEqual(processed, 2)
+        self.assertTrue(update_ack["ok"])
+        self.assertEqual(update_ack["data"]["card_id"], "card-1")
+        self.assertEqual(backend.updated, ("card-1", {"title": "new"}, 2))
+        self.assertFalse(image_ack["ok"])
+        self.assertEqual(image_ack["data"]["reason"], "unsupported")
+
+    def test_notify_queue_rejects_missing_default_target(self) -> None:
         with tempfile.TemporaryDirectory() as raw_tmp:
             tmp = Path(raw_tmp)
             runtime_dir = tmp / "runtime"
@@ -599,12 +688,7 @@ class McpToolSchemaTests(unittest.TestCase):
                 json.dumps(
                     {
                         "schema_version": 1,
-                        "notifications": {
-                            "policy": "important_only",
-                            "default_channel": "feishu",
-                            "default_target_type": "open_id",
-                            "default_target_id": "ou-owner",
-                        },
+                        "notifications": {"policy": "important_only"},
                         "loops": [],
                     },
                     ensure_ascii=False,
@@ -617,13 +701,66 @@ class McpToolSchemaTests(unittest.TestCase):
                 runtime_config=RuntimeConfigStore(runtime_dir),
                 repo_root=ROOT,
             )
-            handler = DaemonMcpToolHandler(core_runtime=_core_runtime(wrapper))
+            worker = NotifyQueueWorker(
+                queue_dir=tmp / "notify_queue",
+                scan_interval_seconds=5,
+                core_runtime=_core_runtime(wrapper),
+            )
+            pending = worker.pending_dir
+            pending.mkdir(parents=True)
+            (pending / "missing.json").write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "job_id": "missing",
+                        "kind": "text",
+                        "payload": {"text": "测试成功"},
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
 
-            with self.assertRaisesRegex(RuntimeError, "unsupported arguments"):
-                handler.call_tool(
-                    "channel_send_text",
-                    {"text": "测试成功", "target_id": "legacy"},
-                )
+            worker.process_pending()
+            ack = json.loads((worker.ack_dir / "missing.json").read_text())
+
+        self.assertFalse(ack["ok"])
+        self.assertIn("no default notification target", ack["message"])
+
+    def test_notify_script_enqueues_random_file_with_loop_env(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            queue_dir = Path(raw_tmp) / "notify_queue"
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(ROOT / "scripts" / "pkuclaw_notify.py"),
+                    "--no-wait",
+                    "text",
+                    "--message",
+                    "测试成功",
+                ],
+                cwd=ROOT,
+                env={
+                    "PATH": "",
+                    "PKUCLAW_NOTIFY_QUEUE_DIR": str(queue_dir),
+                    "PKUCLAW_LOOP_ID": "test_loop",
+                },
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=True,
+            )
+            payload = json.loads(completed.stdout)
+            pending_files = list((queue_dir / "pending").glob("*.json"))
+            job = json.loads(pending_files[0].read_text(encoding="utf-8"))
+
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["message"], "queued")
+        self.assertEqual(len(pending_files), 1)
+        self.assertEqual(job["kind"], "text")
+        self.assertEqual(job["loop_id"], "test_loop")
+        self.assertEqual(job["payload"], {"text": "测试成功"})
+        self.assertEqual(job["job_id"], payload["data"]["job_id"])
 
 
 if __name__ == "__main__":

@@ -19,6 +19,6 @@ model = "gpt-5.5"
 timeout_seconds = 1800
 max_concurrent_runs = 1
 
-[mcp]
-host = "127.0.0.1"
-port = 8765
+[notify_queue]
+queue_dir = "notify_queue"
+scan_interval_seconds = 5

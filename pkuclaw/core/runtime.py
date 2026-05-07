@@ -27,6 +27,7 @@ from pkuclaw.runtime.config import (
     RuntimeNotificationConfig,
 )
 from pkuclaw.runtime.events import RuntimeEventSpec, read_event_catalog
+from pkuclaw.runtime.skills import NOTIFICATION_SKILL_NAME
 
 
 class CoreRuntime:
@@ -248,7 +249,7 @@ class CoreRuntime:
         runtime = self.runtime_config.read_snapshot()
         loop = _select_loop(runtime.loops, loop_id=loop_id)
         text = loop.prompt or "Run this configured periodic loop. Stay silent unless important."
-        suggested_skills = loop.skill_names
+        suggested_skills = _loop_suggested_skills(loop.skill_names)
         scheduled_at = scheduled_at or utc_now()
         target = _loop_notification_target(loop, runtime.notifications)
         channel_context: dict[str, Any] = {
@@ -353,6 +354,14 @@ def _select_loop(
     if enabled:
         return enabled[0]
     raise RuntimeError("no enabled runtime loops")
+
+
+def _loop_suggested_skills(skill_names: tuple[str, ...]) -> tuple[str, ...]:
+    """Append the loop notification skill to every loop run."""
+
+    if NOTIFICATION_SKILL_NAME in skill_names:
+        return skill_names
+    return (*skill_names, NOTIFICATION_SKILL_NAME)
 
 
 def _loop_notification_target(

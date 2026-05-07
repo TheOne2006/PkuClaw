@@ -27,7 +27,7 @@ configs/runtime/
 - 先读当前文件和相关 loader/schema，再修改。
 - 一次只改用户要求的最小范围。
 - 保持 `schema_version` 不变，除非同步修改 loader 和测试。
-- `realtime` prompt 不加入 MCP/channel tools；`loop` prompt 默认静默，只能使用 channel notification tools。
+- `realtime` prompt 不加入 notification scripts；`loop` prompt 默认静默，只能使用 notification scripts。
 - loop 不应自动执行提交作业、删除数据、登录交互、安装系统依赖等高风险动作。
 - 修改 `skills.json` 时，必须保证每个 `path` 指向存在的 markdown 文件。
 
@@ -77,7 +77,7 @@ configs/runtime/
 }
 ```
 
-MCP 通知发送工具不接受 `channel`、`target_type`、`target_id` 或 `loop_id` 参数；Agent 只传消息内容，daemon 根据当前 loop 自动使用 loop 覆盖目标，否则退回 `notifications` 默认目标。目标字段要么三个都写，要么都不写。
+通知脚本不接受 `channel`、`target_type` 或 `target_id` 参数；Agent 只传消息内容。loop id 默认由 provider 写入 `PKUCLAW_LOOP_ID`，必要时可用脚本的 `--loop-id` 显式覆盖。daemon 根据 loop id 自动使用 loop 覆盖目标，否则退回 `notifications` 默认目标。目标字段要么三个都写，要么都不写。
 
 ### 调整 quick action
 

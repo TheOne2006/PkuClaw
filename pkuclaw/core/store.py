@@ -557,7 +557,7 @@ class Store:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         # WAL improves concurrent read/write behavior for Feishu callbacks,
-        # LoopManager workers, and MCP requests sharing the same local DB.
+        # LoopManager workers, and local notify queue workers sharing the same local DB.
         conn.execute("pragma journal_mode = wal")
         conn.execute("pragma foreign_keys = on")
         try:

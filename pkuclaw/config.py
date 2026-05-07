@@ -60,10 +60,10 @@ class AgentConfig:
 
 
 @dataclass(frozen=True)
-class McpConfig:
-    """notification MCP HTTP 服务监听配置。"""
-    host: str
-    port: int
+class NotifyQueueConfig:
+    """loop notification 文件队列配置。"""
+    queue_dir: Path
+    scan_interval_seconds: int
 
 
 @dataclass(frozen=True)
@@ -74,7 +74,7 @@ class Settings:
     feishu: FeishuConfig
     agent: AgentConfig
     codex: CodexConfig
-    mcp: McpConfig
+    notify_queue: NotifyQueueConfig
 
 
 def load_settings(config_path: Path | None = None) -> Settings:
@@ -87,7 +87,7 @@ def load_settings(config_path: Path | None = None) -> Settings:
     feishu_raw = _get_section(raw, "feishu")
     agent_raw = _get_section(raw, "agent")
     codex_raw = _get_section(raw, "codex")
-    mcp_raw = _get_section(raw, "mcp")
+    notify_queue_raw = _get_section(raw, "notify_queue")
 
     app = AppConfig(
         name=_read_str(app_raw, "name", default="PkuClaw"),
@@ -120,9 +120,18 @@ def load_settings(config_path: Path | None = None) -> Settings:
             1, _read_int(codex_raw, "max_concurrent_runs", default=1)
         ),
     )
-    mcp = McpConfig(
-        host=_read_str(mcp_raw, "host", default="127.0.0.1"),
-        port=max(1, _read_int(mcp_raw, "port", default=8765)),
+    notify_queue = NotifyQueueConfig(
+        queue_dir=Path(
+            _read_str(notify_queue_raw, "queue_dir", default="notify_queue")
+        ),
+        scan_interval_seconds=max(
+            1,
+            _read_int(
+                notify_queue_raw,
+                "scan_interval_seconds",
+                default=5,
+            ),
+        ),
     )
     return Settings(
         config_path=path,
@@ -130,8 +139,17 @@ def load_settings(config_path: Path | None = None) -> Settings:
         feishu=feishu,
         agent=agent,
         codex=codex,
-        mcp=mcp,
+        notify_queue=notify_queue,
     )
+
+
+def resolve_notify_queue_dir(settings: Settings) -> Path:
+    """Resolve the daemon/script notification queue directory."""
+
+    queue_dir = settings.notify_queue.queue_dir.expanduser()
+    if queue_dir.is_absolute():
+        return queue_dir
+    return settings.app.data_dir / queue_dir
 
 
 def _resolve_config_path(config_path: Path | None) -> Path:

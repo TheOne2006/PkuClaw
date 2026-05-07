@@ -100,6 +100,16 @@
       "requires_confirmation": false,
       "description": "读取、抽取和总结 PDF/讲义内容的工具说明。",
       "path": "tools/pdf-reader.md"
+    },
+    {
+      "name": "tools/channel-notifier.md",
+      "dependencies": [],
+      "allowed_sources": [
+        "loop"
+      ],
+      "requires_confirmation": false,
+      "description": "loop 通知脚本：写入本地文件队列来发送文本、卡片、图片请求或更新卡片；daemon 扫描队列并负责目标解析和标准渲染。",
+      "path": "tools/channel-notifier.md"
     }
   ]
 }

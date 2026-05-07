@@ -18,7 +18,6 @@ from pkuclaw.core.models import (
     merge_agent_settings,
 )
 from pkuclaw.core.store import RunRecord, Store
-from pkuclaw.mcp.schemas import render_tool_prompt
 from pkuclaw.runtime.config import (
     RuntimeConfigStore,
     describe_notify_policy,
@@ -26,6 +25,7 @@ from pkuclaw.runtime.config import (
 from pkuclaw.runtime.prompts import read_prompt_templates, render_prompt_template
 from pkuclaw.agents.providers.codex import CodexAgent
 from pkuclaw.runtime.skills import (
+    NOTIFICATION_SKILL_NAME,
     load_skill_registry,
     render_skill_catalog,
     render_suggested_skills,
@@ -194,10 +194,8 @@ class AgentWrapper:
             skill_catalog_text=skill_catalog_text,
             rendered_skills=suggested_skills_text,
             prompt_fragments="",
-            mcp_tools_text=(
-                render_tool_prompt()
-                if request.source == "loop"
-                else ""
+            notification_script_text=(
+                _notification_script_text() if request.source == "loop" else ""
             ),
             warnings=warnings,
         )
@@ -247,7 +245,7 @@ class AgentWrapper:
                 "notify_policy": notify_policy,
                 "notify_policy_description": describe_notify_policy(notify_policy),
                 "notification_target": _notification_target_text(channel_context.get("target")),
-                "channel_notification_tools": context.mcp_tools_text,
+                "notification_script_skill": context.notification_script_text,
                 "skill_catalog": context.skill_catalog_text,
                 "suggested_skills": context.rendered_skills,
                 "task": context.request.text,
@@ -299,3 +297,13 @@ def _notification_target_text(value: object) -> str:
         target_id = value.get("target_id") or "unknown"
         return f"`{channel}` / `{target_type}` / `{target_id}`"
     return "not configured"
+
+
+def _notification_script_text() -> str:
+    """Render concise loop-facing notification script instructions."""
+
+    return (
+        "Use the notification script skill when this loop needs to notify the user. "
+        f"Read `configs/runtime/skills/{NOTIFICATION_SKILL_NAME}` and call the "
+        "documented queue-based Python script."
+    )

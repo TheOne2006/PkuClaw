@@ -1,4 +1,4 @@
-"""构建 Store、RuntimeConfigStore、CoreRuntime、Feishu、MCP 和 LoopManager。"""
+"""构建 Store、RuntimeConfigStore、CoreRuntime、Feishu、通知队列和 LoopManager。"""
 from __future__ import annotations
 
 from concurrent.futures import Executor, ThreadPoolExecutor
@@ -8,12 +8,12 @@ from pathlib import Path
 
 from pkuclaw.agents.wrapper import AgentWrapper
 from pkuclaw.channels.feishu.gateway import FeishuRealtimeGateway, build_feishu_realtime_gateway
-from pkuclaw.config import Settings
+from pkuclaw.config import Settings, resolve_notify_queue_dir
 from pkuclaw.core import logging as log
 from pkuclaw.core.runtime import CoreRuntime
 from pkuclaw.core.store import Store
 from pkuclaw.core.loops import LoopManager
-from pkuclaw.mcp.server import DaemonMcpServer
+from pkuclaw.notify_queue.worker import NotifyQueueWorker
 from pkuclaw.runtime.config import RuntimeConfigStore
 
 
@@ -37,7 +37,7 @@ class RuntimeBootstrap:
     services: CoreRuntimeServices
     feishu_gateway: FeishuRealtimeGateway
     loop_manager: LoopManager | None = None
-    mcp_server: DaemonMcpServer | None = None
+    notify_queue_worker: NotifyQueueWorker | None = None
     threads: tuple[threading.Thread, ...] = field(default_factory=tuple)
 
 
@@ -45,14 +45,14 @@ def run_runtime(
     settings: Settings,
     *,
     enable_loop: bool,
-    enable_mcp: bool,
+    enable_notify_queue: bool,
 ) -> None:
     """Build the daemon runtime graph, then block on the Feishu channel adapter."""
 
     bootstrap = build_runtime_bootstrap(
         settings,
         enable_loop=enable_loop,
-        enable_mcp=enable_mcp,
+        enable_notify_queue=enable_notify_queue,
     )
     bootstrap.feishu_gateway.start()
 
@@ -61,11 +61,15 @@ def build_runtime_bootstrap(
     settings: Settings,
     *,
     enable_loop: bool,
-    enable_mcp: bool,
+    enable_notify_queue: bool,
 ) -> RuntimeBootstrap:
-    """Build CoreRuntime, register Feishu, optionally start MCP/LoopManager."""
+    """Build CoreRuntime, register Feishu, optionally start notify queue/LoopManager."""
 
-    _log_runtime(settings, enable_loop=enable_loop, enable_mcp=enable_mcp)
+    _log_runtime(
+        settings,
+        enable_loop=enable_loop,
+        enable_notify_queue=enable_notify_queue,
+    )
     services = build_core_runtime_services(settings)
     feishu_gateway = build_feishu_realtime_gateway(
         settings=settings,
@@ -77,9 +81,9 @@ def build_runtime_bootstrap(
     log.ok("Feishu channel registered with CoreRuntime outbox registry")
 
     threads: list[threading.Thread] = []
-    mcp_server: DaemonMcpServer | None = None
-    if enable_mcp:
-        mcp_server, thread = _start_mcp_thread(
+    notify_queue_worker: NotifyQueueWorker | None = None
+    if enable_notify_queue:
+        notify_queue_worker, thread = _start_notify_queue_thread(
             settings=settings,
             core_runtime=services.core_runtime,
             default_channel=feishu_gateway.channel,
@@ -98,7 +102,7 @@ def build_runtime_bootstrap(
         services=services,
         feishu_gateway=feishu_gateway,
         loop_manager=loop_manager,
-        mcp_server=mcp_server,
+        notify_queue_worker=notify_queue_worker,
         threads=tuple(threads),
     )
 
@@ -159,27 +163,32 @@ def _start_loop_manager(
     return loop_manager, thread
 
 
-def _start_mcp_thread(
+def _start_notify_queue_thread(
     *,
     settings: Settings,
     core_runtime: CoreRuntime,
     default_channel: str,
-) -> tuple[DaemonMcpServer, threading.Thread]:
-    """创建 DaemonMcpServer 并在 daemon 线程中启动。"""
-    server = DaemonMcpServer(
-        host=settings.mcp.host,
-        port=settings.mcp.port,
+) -> tuple[NotifyQueueWorker, threading.Thread]:
+    """创建 NotifyQueueWorker 并在 daemon 线程中启动。"""
+
+    queue_dir = resolve_notify_queue_dir(settings)
+    worker = NotifyQueueWorker(
+        queue_dir=queue_dir,
+        scan_interval_seconds=settings.notify_queue.scan_interval_seconds,
         core_runtime=core_runtime,
         default_channel=default_channel,
     )
     thread = threading.Thread(
-        target=server.serve_forever,
-        name="pkuclaw-mcp",
+        target=worker.serve_forever,
+        name="pkuclaw-notify-queue",
         daemon=True,
     )
     thread.start()
-    log.ok(f"MCP server thread started: {settings.mcp.host}:{settings.mcp.port}")
-    return server, thread
+    log.ok(
+        "Notification queue worker started: "
+        f"{queue_dir} (scan={settings.notify_queue.scan_interval_seconds}s)"
+    )
+    return worker, thread
 
 
 def _open_store(settings: Settings) -> Store:
@@ -198,7 +207,7 @@ def _log_runtime(
     settings: Settings,
     *,
     enable_loop: bool,
-    enable_mcp: bool,
+    enable_notify_queue: bool,
 ) -> None:
     """输出 runtime bootstrap 的启动配置摘要。"""
     log.stage("Booting PkuClaw runtime")
@@ -213,7 +222,7 @@ def _log_runtime(
             ("codex_sandbox", settings.codex.sandbox),
             ("codex_timeout", f"{settings.codex.timeout_seconds}s"),
             ("max_workers", settings.codex.max_concurrent_runs),
-            ("mcp", "enabled" if enable_mcp else "disabled"),
+            ("notify_queue", "enabled" if enable_notify_queue else "disabled"),
             ("loop_manager", "enabled" if enable_loop else "disabled"),
         ],
     )
