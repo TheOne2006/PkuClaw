@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 import json
 import tempfile
 import unittest
@@ -17,6 +18,7 @@ from pkuclaw.channels.feishu.events import (
     card_action_target,
     card_action_value,
 )
+from pkuclaw.channels.feishu.handlers import FeishuEventHandlers
 from pkuclaw.channels.feishu.tools import FeishuChannelOutboundBackend
 from pkuclaw.core.models import AgentEvent
 from pkuclaw.core.store import Store
@@ -33,10 +35,12 @@ from tests.helpers import (
     FakeUpdateCardRequest,
     FakeUpdateCardRequestBody,
     _buttons,
+    _core_runtime,
     _element_tags,
     _fake_feishu_cardkit_client,
     _feishu_chat_target,
     _markdown_contents,
+    _settings,
 )
 
 
@@ -267,6 +271,70 @@ class FeishuCardActionTests(unittest.TestCase):
 
 
 class FeishuOutboxTests(unittest.TestCase):
+    def test_send_text_renders_exact_control_card_payload(self) -> None:
+        fake_api = FakeFeishuApi()
+        renderer = FeishuCardRenderer()
+        backend = FeishuChannelOutboundBackend(
+            client=_fake_feishu_cardkit_client(fake_api),
+            renderer=renderer,
+        )
+
+        text = "已切换 Agent 到 Fast 模式。"
+        backend.send_text(target=_feishu_chat_target(), text=text)
+
+        created_card = json.loads(fake_api.cardkit.v1.card.created.body.data)
+        self.assertEqual(
+            created_card,
+            renderer.control_card(title="PkuClaw", body=text),
+        )
+
+    def test_local_control_menu_uses_same_control_card_rendering(self) -> None:
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            ThreadPoolExecutor(max_workers=1) as executor,
+            ThreadPoolExecutor(max_workers=1) as callback_executor,
+        ):
+            root = Path(tmp)
+            store = Store(root / "pkuclaw.db")
+            core_runtime = _core_runtime(root, store)
+            fake_api = FakeFeishuApi()
+            renderer = FeishuCardRenderer()
+            message_client = _fake_feishu_cardkit_client(fake_api)
+            core_runtime.register_channel_backend(
+                FeishuChannelOutboundBackend(
+                    client=message_client,
+                    renderer=renderer,
+                )
+            )
+            handler = FeishuEventHandlers(
+                settings=_settings(root),
+                core_runtime=core_runtime,
+                message_client=message_client,
+                card_renderer=renderer,
+                card_action_response_cls=lambda payload: payload,
+                executor=executor,
+                callback_executor=callback_executor,
+            )
+
+            handler.on_bot_menu(
+                FakeObject(
+                    event=FakeObject(
+                        event_key="mode:fast",
+                        operator=FakeObject(
+                            operator_id=FakeObject(open_id="ou_user"),
+                        ),
+                    )
+                )
+            )
+
+        self.assertEqual(fake_api.im.v1.message.created.body.receive_id, "ou_user")
+        self.assertEqual(fake_api.im.v1.message.created.receive_id_type, "open_id")
+        created_card = json.loads(fake_api.cardkit.v1.card.created.body.data)
+        self.assertEqual(
+            created_card,
+            renderer.control_card(title="PkuClaw", body="已切换 Agent 到 Fast 模式。"),
+        )
+
     def test_feishu_outbox_backend_sends_text_and_reports_image_gap(self) -> None:
         fake_api = FakeFeishuApi()
         backend = FeishuChannelOutboundBackend(
