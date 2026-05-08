@@ -13,14 +13,18 @@ Runtime files are ordinary files under `configs/runtime/`:
 
 ```text
 configs/runtime/
-  runtime.json          # hot-loaded runtime config and loop specs
+  runtime.example.json  # tracked template for local runtime config
+  runtime.json          # untracked, hot-loaded runtime config and loop specs
   events.json           # realtime quick action catalog
   prompts.json          # hot-loaded realtime/loop prompt templates
   skills.json           # skill catalog metadata
   skills/               # runtime skill markdown files
 ```
 
-Agents may read and edit these files directly when the task calls for it.
+Copy `runtime.example.json` to `runtime.json` before setting local loop targets.
+`runtime.json` is intentionally ignored because it may contain channel-specific
+identifiers such as Feishu `open_id`/`chat_id`. Agents may read and edit these
+files directly when the task calls for it, but should not commit `runtime.json`.
 
 ## Realtime quick actions
 
@@ -70,7 +74,7 @@ flowchart TD
   Scheduler[LoopManager tick] --> Loop[CoreRuntime creates source=loop]
   Realtime --> Wrapper[AgentWrapper]
   Loop --> Wrapper
-  RuntimeFiles[configs/runtime/runtime.json + events.json + prompts.json + skills.json + skills/**] --> Wrapper
+  RuntimeFiles[configs/runtime/runtime.json (local) + events.json + prompts.json + skills.json + skills/**] --> Wrapper
   Wrapper --> Agent[Codex Agent]
   Agent --> Reply[Realtime reply]
   Agent --> Script[Channel outbox queue script]

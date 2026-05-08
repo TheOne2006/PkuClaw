@@ -16,7 +16,7 @@ source = realtime
 suggested_skills = ()
 ```
 
-LoopManager 从 `configs/runtime/runtime.json` 读取对应 loop，并创建：
+LoopManager 从本地 `configs/runtime/runtime.json` 读取对应 loop，并创建：
 
 ```text
 source = loop
@@ -29,7 +29,8 @@ suggested_skills = loop.skill_names + (tools/channel-notifier.md,)
 
 ```text
 configs/runtime/
-  runtime.json          # agent/codex/loops/notification 配置
+  runtime.example.json  # 可提交的本地 runtime 配置模板
+  runtime.json          # 不提交；agent/codex/loops/notification 配置
   events.json           # realtime quick action 配置
   prompts.json          # realtime/loop prompt 模板
   skills.json           # Skill Catalog source of truth
@@ -153,7 +154,9 @@ loop Agent -> channel-notifier skill -> Python queue script -> data/notify_queue
 
 ## 8. runtime.json
 
-`configs/runtime/runtime.json` 热加载。通知目标优先级：
+`configs/runtime/runtime.example.json` 是可提交模板；本地复制为
+`configs/runtime/runtime.json` 后由 daemon 热加载。`runtime.json` 不提交，
+因为它可能包含飞书 `open_id`/`chat_id` 等本地 channel 目标。通知目标优先级：
 
 1. 当前 loop 的 `default_channel/default_target_type/default_target_id`；
 2. 全局 `notifications.default_channel/default_target_type/default_target_id`。

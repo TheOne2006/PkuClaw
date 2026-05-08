@@ -42,12 +42,17 @@ configs/runtime/prompts.json
 Runtime 文件是普通可编辑文件：
 
 ```text
-configs/runtime/runtime.json
+configs/runtime/runtime.example.json
+configs/runtime/runtime.json  # local, ignored
 configs/runtime/events.json
 configs/runtime/prompts.json
 configs/runtime/skills.json
 configs/runtime/skills/**
 ```
+
+`runtime.example.json` 是可提交模板；本地复制为 `runtime.json` 后再填写 loop
+通知目标。不要提交真实 `runtime.json`，它可能包含 `open_id`/`chat_id` 等本地
+channel 目标。
 
 修改时建议保持：
 
