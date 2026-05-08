@@ -15,6 +15,7 @@ configs/runtime/
     pku3b/              # pku3b install and usage docs
     tasks/              # user-facing study/course tasks
     tools/              # shared helpers, including channel outbox scripts
+  templates/            # reusable runtime templates such as LaTeX note templates
 ```
 
 ## Run sources
@@ -67,6 +68,20 @@ Each catalog entry provides:
 Prompt builders render only the Skill Catalog. Agents choose relevant skills and read the markdown files by `path` when needed. `configs/runtime/skills/` is writable so Agents can create or update skills during runtime when explicitly appropriate.
 
 `sub-skills/` is no longer a runtime skill source.
+
+## Templates
+
+Reusable, non-secret generation templates live under `configs/runtime/templates/`.
+For course-note generation, `tasks/write-notes.md` uses:
+
+```text
+configs/runtime/templates/latex/course-note/note.tex
+configs/runtime/templates/latex/course-note/chapter.tex
+```
+
+Agents should copy/render these templates into the target course directory and
+replace all `@@PLACEHOLDER@@` tokens before compiling. Template files in
+`configs/runtime/templates/` are not compiled directly.
 
 ## Prompt templates
 
