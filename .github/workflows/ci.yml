@@ -57,6 +57,6 @@ jobs:
       - name: Build docs site
         working-directory: docs-site
         env:
-          ASTRO_TELEMETRY_DISABLED: 1
+          NEXT_TELEMETRY_DISABLED: 1
         run: npm run build
 

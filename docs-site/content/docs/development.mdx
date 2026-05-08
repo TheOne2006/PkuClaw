@@ -72,9 +72,7 @@ npm run build
 
 ## 开发 workflow
 
-<div class="pkuclaw-steps">
-  <div class="pkuclaw-step"><strong>1. 明确边界：</strong>判断修改属于 core、runtime、agents、channels 还是 scripts。</div>
-  <div class="pkuclaw-step"><strong>2. 小步提交：</strong>先改最小闭环，避免同时重构多个层。</div>
-  <div class="pkuclaw-step"><strong>3. 本地验证：</strong>运行 Python 检查，文档改动运行 Astro build。</div>
-  <div class="pkuclaw-step"><strong>4. 更新文档：</strong>行为变更同步更新 Starlight 文档和 runtime README。</div>
-</div>
+1. **明确边界**：判断修改属于 core、runtime、agents、channels 还是 scripts。
+2. **小步提交**：先改最小闭环，避免同时重构多个层。
+3. **本地验证**：运行 Python 检查；文档改动运行 Next.js/Fumadocs build。
+4. **更新文档**：行为变更同步更新 Fumadocs 文档和 runtime README。
