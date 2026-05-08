@@ -113,7 +113,7 @@ def load_settings(config_path: Path | None = None) -> Settings:
     )
     codex = CodexConfig(
         bin=_read_str(codex_raw, "bin", default="codex"),
-        sandbox=_read_str(codex_raw, "sandbox", default="workspace-write"),
+        sandbox=_read_str(codex_raw, "sandbox", default="danger-full-access"),
         model=_read_optional_str(codex_raw, "model"),
         timeout_seconds=max(30, _read_int(codex_raw, "timeout_seconds", default=1800)),
         max_concurrent_runs=max(

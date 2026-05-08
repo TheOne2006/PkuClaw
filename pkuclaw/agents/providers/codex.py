@@ -23,8 +23,8 @@ from pkuclaw.core.models import (
 )
 
 
-CODEX_APPROVAL_REVIEWER = "auto_review"
-CODEX_APPROVAL_POLICY = "on-request"
+CODEX_FULL_ACCESS_SANDBOX = "danger-full-access"
+CODEX_BYPASS_APPROVALS_AND_SANDBOX_FLAG = "--dangerously-bypass-approvals-and-sandbox"
 
 
 class CodexAgent:
@@ -85,9 +85,11 @@ class CodexAgent:
             runtime=context.runtime,
         )
         mode = "resume" if context.conversation.agent_session_id else "new"
+        sandbox = self._effective_sandbox(context.runtime)
         log.stage(
             "Running Codex CLI: "
-            f"mode={mode}, sandbox={self._effective_sandbox(context.runtime)}, "
+            f"mode={mode}, sandbox={sandbox}, "
+            f"full_access={self._uses_full_access(context.runtime)}, "
             f"timeout={self._effective_timeout(context.runtime)}s"
         )
         log.event(
@@ -293,6 +295,8 @@ class CodexAgent:
         command = [self.settings.codex.bin, "exec"]
         if session_id:
             command.extend(["resume", "--json", "-o", str(result_path)])
+            if self._uses_full_access(runtime):
+                command.append(CODEX_BYPASS_APPROVALS_AND_SANDBOX_FLAG)
             self._append_runtime_options(command, agent_settings)
             command.extend([session_id, "-"])
             return command
@@ -302,12 +306,14 @@ class CodexAgent:
                 "--json",
                 "-C",
                 str(self.repo_root),
-                "-s",
-                self._effective_sandbox(runtime),
                 "-o",
                 str(result_path),
             ]
         )
+        if self._uses_full_access(runtime):
+            command.append(CODEX_BYPASS_APPROVALS_AND_SANDBOX_FLAG)
+        else:
+            command.extend(["-s", self._effective_sandbox(runtime)])
         self._append_runtime_options(command, agent_settings)
         command.append("-")
         return command
@@ -317,21 +323,13 @@ class CodexAgent:
         command: list[str],
         agent_settings: AgentSettings,
     ) -> None:
-        """把固定 model、reasoning 和 auto-review 审批选项追加到 Codex 命令行。"""
+        """把固定 model 和 reasoning 选项追加到 Codex 命令行。"""
         model = self._effective_model(agent_settings)
         if model:
             command.extend(["-m", model])
         reasoning = self._effective_reasoning(agent_settings)
         if reasoning:
             command.extend(["-c", f'model_reasoning_effort="{reasoning}"'])
-        command.extend(
-            [
-                "-c",
-                f'approval_policy="{CODEX_APPROVAL_POLICY}"',
-                "-c",
-                f'approvals_reviewer="{CODEX_APPROVAL_REVIEWER}"',
-            ]
-        )
 
     def _effective_model(self, agent_settings: AgentSettings) -> str | None:
         """合并会话/runtime 和启动配置后的 Codex model。"""
@@ -344,6 +342,10 @@ class CodexAgent:
     def _effective_sandbox(self, runtime: Any) -> str:
         """合并 runtime 和启动配置后的 Codex sandbox。"""
         return runtime.codex.sandbox or self.settings.codex.sandbox
+
+    def _uses_full_access(self, runtime: Any) -> bool:
+        """是否按全权限/无审批方式启动 Codex。"""
+        return self._effective_sandbox(runtime) == CODEX_FULL_ACCESS_SANDBOX
 
     def _effective_timeout(self, runtime: Any) -> int:
         """合并 runtime 和启动配置后的 Codex 超时时间。"""

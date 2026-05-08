@@ -392,7 +392,7 @@ def _parse_config(raw: Mapping[str, Any], *, path: Path) -> RuntimeConfig:
             ),
         ),
         codex=RuntimeCodexConfig(
-            sandbox=_optional_str(codex_raw, "sandbox") or "workspace-write",
+            sandbox=_optional_str(codex_raw, "sandbox") or "danger-full-access",
             timeout_seconds=_positive_int_or_default(
                 codex_raw,
                 "timeout_seconds",
@@ -501,7 +501,7 @@ def _default_raw_config() -> dict[str, Any]:
             "reasoning_effort": DEFAULT_AGENT_REASONING_EFFORT,
         },
         "codex": {
-            "sandbox": "workspace-write",
+            "sandbox": "danger-full-access",
             "timeout_seconds": 1800,
         },
         "loops": [_loop_config_to_raw(loop) for loop in _default_loops()],
@@ -527,7 +527,7 @@ def _config_to_raw(config: RuntimeConfig) -> dict[str, Any]:
             ),
         },
         "codex": {
-            "sandbox": config.codex.sandbox or "workspace-write",
+            "sandbox": config.codex.sandbox or "danger-full-access",
             "timeout_seconds": config.codex.timeout_seconds,
         },
         "loops": [_loop_config_to_raw(loop) for loop in config.loops],

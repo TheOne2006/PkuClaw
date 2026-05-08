@@ -63,7 +63,7 @@ def _settings(data_dir: Path, runtime_dir: Path) -> Settings:
         agent=AgentConfig(provider="codex"),
         codex=CodexConfig(
             bin="codex",
-            sandbox="workspace-write",
+            sandbox="danger-full-access",
             model="gpt-test",
             timeout_seconds=60,
             max_concurrent_runs=1,
@@ -236,7 +236,7 @@ class PromptArchitectureTests(unittest.TestCase):
 
 
 class CodexCommandConfigTests(unittest.TestCase):
-    def test_codex_command_uses_on_request_auto_review_without_mcp_server(self) -> None:
+    def test_codex_command_uses_full_access_bypass_without_approval_config(self) -> None:
         with tempfile.TemporaryDirectory() as raw_tmp:
             settings = _settings(Path(raw_tmp) / "data", ROOT / "configs" / "runtime")
             agent = CodexAgent(settings=settings, repo_root=ROOT)
@@ -256,12 +256,14 @@ class CodexCommandConfigTests(unittest.TestCase):
 
         command_text = "\n".join(command)
         resume_command_text = "\n".join(resume_command)
-        self.assertIn('approval_policy="on-request"', command)
-        self.assertIn('approvals_reviewer="auto_review"', command)
-        self.assertIn('approval_policy="on-request"', resume_command)
-        self.assertIn('approvals_reviewer="auto_review"', resume_command)
-        self.assertNotIn('approval_policy="never"', command_text)
-        self.assertNotIn('approval_policy="never"', resume_command_text)
+        self.assertIn("--dangerously-bypass-approvals-and-sandbox", command)
+        self.assertIn("--dangerously-bypass-approvals-and-sandbox", resume_command)
+        self.assertNotIn("-s", command)
+        self.assertNotIn("-s", resume_command)
+        self.assertNotIn("approval_policy", command_text)
+        self.assertNotIn("approval_policy", resume_command_text)
+        self.assertNotIn("approvals_reviewer", command_text)
+        self.assertNotIn("approvals_reviewer", resume_command_text)
         self.assertNotIn("default_tools_approval_mode", command_text)
         self.assertNotIn("mcp_servers", command_text)
         self.assertNotIn("mcp_servers", resume_command_text)

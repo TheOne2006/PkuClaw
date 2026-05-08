@@ -14,7 +14,7 @@ provider = "codex"
 
 [codex]
 bin = "codex"
-sandbox = "workspace-write"
+sandbox = "danger-full-access"
 model = "gpt-5.5"
 timeout_seconds = 1800
 max_concurrent_runs = 1

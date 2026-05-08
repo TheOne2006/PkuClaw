@@ -11,12 +11,13 @@ description: pku3b raw-only CLI 的安装、构建、登录和环境排障
 
 ## 可用性检查
 
+先按 `pku3b/usage.md` 的“pku3b 二进制解析”确定实际命令；这里不重复优先级。快速检查 repo-local 构建产物：
+
 ```bash
-command -v pku3b || true
 [ -x crates/pku3b/target/debug/pku3b ] && crates/pku3b/target/debug/pku3b --version || true
 ```
 
-优先使用 PATH 中的 `pku3b`；如果仓库内构建产物存在，也可以用于本仓库调试。
+如果 repo-local 不存在，再按 `usage.md` 继续检查 `$PKU3B_BIN` 和 PATH。不要只因 PATH 中没有 `pku3b` 就报告 pku3b 不可用。
 
 ## 从仓库构建
 
