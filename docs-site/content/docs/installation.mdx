@@ -46,11 +46,13 @@ provider = "codex"
 
 [codex]
 bin = "codex"
-sandbox = "workspace-write"
+sandbox = "danger-full-access"
 model = "gpt-5.5"
 timeout_seconds = 1800
 max_concurrent_runs = 1
 ```
+
+当前示例配置会让 PkuClaw 以 Codex full-access/bypass 模式运行，适合可信本地环境和需要访问课程工具/本地文件的后台 loop。若改成更严格 sandbox，请同步评估任务是否会被审批、网络或文件权限阻塞。
 
 请确认本机可以直接运行：
 

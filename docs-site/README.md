@@ -1,21 +1,42 @@
-# PkuClaw Docs Site
+# PkuClaw 文档站
 
-This directory contains the Next.js + Fumadocs documentation site for PkuClaw.
+本目录是 PkuClaw 的 Next.js + Fumadocs 文档站。站点内容以中文为默认语言，面向安装、配置、runtime 概念和开发者入门。
+
+## 本地预览
 
 ```bash
-npm install
+cd docs-site
+npm ci
 npm run dev
-npm run build
 ```
 
-Local development runs on port `4321`; with the GitHub Pages base path, open:
+本地开发默认使用端口 `4321`；由于 GitHub Pages 配置了 base path，请打开：
 
 ```text
 http://localhost:4321/PkuClaw/
 ```
 
-Static export output is written to `docs-site/out` and deployed to:
+## 构建检查
 
-```text
-https://theone2006.github.io/PkuClaw/
+```bash
+cd docs-site
+npm ci
+npm run build
 ```
+
+静态导出结果写入 `docs-site/out`。
+
+## 发布
+
+GitHub Pages 部署由 `.github/workflows/deploy-docs.yml` 触发：
+
+- `main` 分支上 `docs-site/**`、根 README、架构/开发文档等变化会构建并发布；
+- 手动触发可使用 `workflow_dispatch`；
+- Next.js 配置中 `basePath` 固定为 `/PkuClaw`，对应站点路径 `https://theone2006.github.io/PkuClaw/`。
+
+## 维护约定
+
+- 用户向导、安装、配置、概念页放在 `content/docs/`。
+- 仓库内部审计和维护报告放在根目录 `docs/`，必要时从站点链接过去。
+- 示例中不要写真实 app secret、token、cookie、open_id/chat_id。
+- 修改文档站后优先使用 `npm ci` 保持 lockfile 可复现。

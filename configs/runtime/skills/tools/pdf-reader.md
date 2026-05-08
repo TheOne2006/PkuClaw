@@ -1,253 +1,165 @@
+---
+name: pkuclaw-tool-pdf-reader
+description: 读取、抽取和总结 PDF/讲义内容；优先使用已有依赖，缺依赖时先说明
+---
+
 # PDF Reader Skill
 
-读取PDF文件的Python工具方法，支持中文，提供两种方案：高性能模式(PyMuPDF)和表格提取模式(pdfplumber)。
+本 tool skill 用于读取 PDF 文本、表格和图片线索。它只提供读取方法，不负责安装系统包、不自动 OCR、不提交作业。
 
-## 安装依赖
+## 使用边界
+
+- 优先使用当前环境已有的 PyMuPDF (`fitz`) 或 `pdfplumber`。
+- 缺依赖时先向用户说明需要安装什么，不要在未确认时静默 `pip install`。
+- 扫描版 PDF 没有文本层，需要 OCR；不能假装已完整读取。
+- 密码保护 PDF 需要用户提供解锁方式。
+- 超大文件建议分页读取，避免内存占用过高。
+
+## 依赖检查
 
 ```bash
-# 方案1: 安装全部（推荐）
-pip install pdfplumber pymupdf
-
-# 方案2: 仅高性能模式
-pip install pymupdf
-
-# 方案3: 仅表格提取模式
-pip install pdfplumber
+python - <<'PY'
+for name in ("fitz", "pdfplumber"):
+    try:
+        __import__(name)
+        print(f"{name}: available")
+    except ModuleNotFoundError:
+        print(f"{name}: missing")
+PY
 ```
 
-## 快速开始
+如果用户确认安装，可按环境选择：
 
-### 方法1: PyMuPDF (推荐，速度最快)
+```bash
+python -m pip install pymupdf pdfplumber
+```
+
+## PyMuPDF：快速读取文本
 
 ```python
+from pathlib import Path
 import fitz  # PyMuPDF
 
-def read_pdf_pymupdf(pdf_path, pages=None):
-    """
-    使用 PyMuPDF 读取PDF文本
 
-    Args:
-        pdf_path: PDF文件路径
-        pages: 指定页码列表，如 [0, 1, 2] 或 range(5)，None表示全部
-
-    Returns:
-        dict: {'total_pages': 总页数, 'text': {页码: 文本内容}}
-    """
-    doc = fitz.open(pdf_path)
-    result = {'total_pages': len(doc), 'text': {}}
-
-    page_range = pages if pages is not None else range(len(doc))
-
-    for i in page_range:
-        if 0 <= i < len(doc):
-            result['text'][i + 1] = doc[i].get_text()
-
-    doc.close()
+def read_pdf_pymupdf(pdf_path: str | Path, pages=None) -> dict:
+    path = Path(pdf_path)
+    result = {"total_pages": 0, "text": {}}
+    with fitz.open(path) as doc:
+        result["total_pages"] = len(doc)
+        page_range = pages if pages is not None else range(len(doc))
+        for index in page_range:
+            if 0 <= index < len(doc):
+                result["text"][index + 1] = doc[index].get_text()
     return result
 
-# 使用示例
-pdf_path = "/Users/moonshot/Desktop/桌面整理/项目/pku大四下/逻辑导论/lectures/2.一只麻雀与逻辑学的起源.pdf"
 
-# 读取全部内容
-content = read_pdf_pymupdf(pdf_path)
-print(f"总页数: {content['total_pages']}")
-print(content['text'][1])  # 打印第1页
-
-# 读取指定页
-content = read_pdf_pymupdf(pdf_path, pages=[0, 1, 2])  # 第1-3页
-
-# 读取前5页
-content = read_pdf_pymupdf(pdf_path, pages=range(5))
+content = read_pdf_pymupdf("/path/to/course/lectures/lecture-01.pdf")
+print(content["total_pages"])
+print(content["text"].get(1, ""))
 ```
 
-### 方法2: pdfplumber (表格提取更强)
+## pdfplumber：表格友好读取
 
 ```python
+from pathlib import Path
 import pdfplumber
 
-def read_pdf_pdfplumber(pdf_path, pages=None):
-    """
-    使用 pdfplumber 读取PDF文本和表格
 
-    Args:
-        pdf_path: PDF文件路径
-        pages: 指定页码列表，如 [0, 1, 2]，None表示全部
-
-    Returns:
-        dict: {
-            'total_pages': 总页数,
-            'text': {页码: 文本内容},
-            'tables': {页码: [表格数据]}
-        }
-    """
-    result = {'total_pages': 0, 'text': {}, 'tables': {}}
-
-    with pdfplumber.open(pdf_path) as pdf:
-        result['total_pages'] = len(pdf.pages)
-
+def read_pdf_pdfplumber(pdf_path: str | Path, pages=None) -> dict:
+    path = Path(pdf_path)
+    result = {"total_pages": 0, "text": {}, "tables": {}}
+    with pdfplumber.open(path) as pdf:
+        result["total_pages"] = len(pdf.pages)
         page_range = pages if pages is not None else range(len(pdf.pages))
-
-        for i in page_range:
-            if 0 <= i < len(pdf.pages):
-                page = pdf.pages[i]
-                result['text'][i + 1] = page.extract_text() or ""
-                # 提取表格
+        for index in page_range:
+            if 0 <= index < len(pdf.pages):
+                page = pdf.pages[index]
+                result["text"][index + 1] = page.extract_text() or ""
                 tables = page.extract_tables()
                 if tables:
-                    result['tables'][i + 1] = tables
-
+                    result["tables"][index + 1] = tables
     return result
 
-# 使用示例
-pdf_path = "/Users/moonshot/Desktop/桌面整理/项目/pku大四下/逻辑导论/lectures/2.一只麻雀与逻辑学的起源.pdf"
 
-content = read_pdf_pdfplumber(pdf_path, pages=[0, 1])
-
-# 查看表格
-if content['tables']:
-    for page_num, tables in content['tables'].items():
-        print(f"第 {page_num} 页有 {len(tables)} 个表格")
+content = read_pdf_pdfplumber("/path/to/course/assignments/homework.pdf", pages=[0, 1])
+print(content["tables"].keys())
 ```
 
-### 方法3: 提取图片
+## 图片抽取线索
 
 ```python
-import fitz
-from PIL import Image
-import io
-
-def extract_images(pdf_path, page_num=0):
-    """从PDF指定页提取图片"""
-    doc = fitz.open(pdf_path)
-    page = doc[page_num]
-
-    images = []
-    for img_index, img in enumerate(page.get_images(), start=1):
-        xref = img[0]
-        base_image = doc.extract_image(xref)
-        image_bytes = base_image["image"]
-        image_ext = base_image["ext"]
-
-        # 转换为PIL Image
-        image = Image.open(io.BytesIO(image_bytes))
-        images.append({
-            'ext': image_ext,
-            'image': image,
-            'bytes': image_bytes
-        })
-
-    doc.close()
-    return images
-
-# 使用示例
-# images = extract_images(pdf_path, page_num=0)
-# for img in images:
-#     img['image'].save(f"image.{img['ext']}")
-```
-
-## 完整工具类
-
-```python
-import fitz
-import pdfplumber
 from pathlib import Path
+import fitz
+
+
+def list_pdf_images(pdf_path: str | Path, page_num: int = 0) -> list[dict]:
+    path = Path(pdf_path)
+    images = []
+    with fitz.open(path) as doc:
+        page = doc[page_num]
+        for img_index, img in enumerate(page.get_images(), start=1):
+            xref = img[0]
+            base = doc.extract_image(xref)
+            images.append({
+                "page": page_num + 1,
+                "index": img_index,
+                "ext": base.get("ext"),
+                "bytes_len": len(base.get("image") or b""),
+            })
+    return images
+```
+
+## 简单工具类
+
+```python
+from pathlib import Path
+import fitz
 
 
 class PDFReader:
-    """PDF读取工具类，整合多种读取方式"""
-
-    def __init__(self, pdf_path):
+    def __init__(self, pdf_path: str | Path):
         self.pdf_path = Path(pdf_path)
         if not self.pdf_path.exists():
-            raise FileNotFoundError(f"PDF文件不存在: {pdf_path}")
+            raise FileNotFoundError(f"PDF 文件不存在: {self.pdf_path}")
 
-    def get_info(self):
-        """获取PDF基本信息"""
+    def info(self) -> dict:
         with fitz.open(self.pdf_path) as doc:
             return {
-                'pages': len(doc),
-                'title': doc.metadata.get('title', ''),
-                'author': doc.metadata.get('author', ''),
-                'subject': doc.metadata.get('subject', ''),
+                "pages": len(doc),
+                "title": doc.metadata.get("title", ""),
+                "author": doc.metadata.get("author", ""),
             }
 
-    def read_text(self, pages=None, mode='fast'):
-        """
-        读取文本
+    def text_by_page(self, pages=None) -> dict[int, str]:
+        with fitz.open(self.pdf_path) as doc:
+            page_range = pages if pages is not None else range(len(doc))
+            return {
+                index + 1: doc[index].get_text()
+                for index in page_range
+                if 0 <= index < len(doc)
+            }
 
-        Args:
-            pages: 页码列表或None(全部)
-            mode: 'fast'(PyMuPDF) 或 'table'(pdfplumber)
-        """
-        if mode == 'fast':
-            return self._read_pymupdf(pages)
-        else:
-            return self._read_pdfplumber(pages)
-
-    def _read_pymupdf(self, pages):
-        """PyMuPDF快速读取"""
-        doc = fitz.open(self.pdf_path)
-        result = {}
-        page_range = pages if pages is not None else range(len(doc))
-
-        for i in page_range:
-            if 0 <= i < len(doc):
-                result[i + 1] = doc[i].get_text()
-
-        doc.close()
-        return result
-
-    def _read_pdfplumber(self, pages):
-        """pdfplumber读取（支持表格）"""
-        result = {'text': {}, 'tables': {}}
-
-        with pdfplumber.open(self.pdf_path) as pdf:
-            page_range = pages if pages is not None else range(len(pdf.pages))
-
-            for i in page_range:
-                if 0 <= i < len(pdf.pages):
-                    page = pdf.pages[i]
-                    result['text'][i + 1] = page.extract_text() or ""
-                    tables = page.extract_tables()
-                    if tables:
-                        result['tables'][i + 1] = tables
-
-        return result
-
-    def search(self, keyword):
-        """搜索关键词，返回所在页码列表"""
+    def search(self, keyword: str) -> list[int]:
         matches = []
-        doc = fitz.open(self.pdf_path)
-
-        for i, page in enumerate(doc):
-            text = page.get_text()
-            if keyword in text:
-                matches.append(i + 1)
-
-        doc.close()
+        with fitz.open(self.pdf_path) as doc:
+            for index, page in enumerate(doc):
+                if keyword in page.get_text():
+                    matches.append(index + 1)
         return matches
-
-
-# 使用示例
-# reader = PDFReader("path/to/file.pdf")
-# info = reader.get_info()
-# text = reader.read_text(pages=range(5))
-# pages_with_keyword = reader.search("关键词")
 ```
 
-## 方案对比
+## 输出建议
 
-| 特性 | PyMuPDF | pdfplumber |
-|------|---------|------------|
-| 速度 | 极快 (~0.04s/76页) | 较快 (~1s/76页) |
-| 中文支持 | 优秀 | 优秀 |
-| 表格提取 | 一般 | 强大 |
-| 图片提取 | 支持 | 不支持 |
-| 内存占用 | 低 | 中等 |
-| 推荐场景 | 快速阅读、搜索 | 数据分析、表格提取 |
+读取后向上层 task 返回结构化摘要：
 
-## 注意事项
+```json
+{
+  "file": "/path/to/file.pdf",
+  "total_pages": 12,
+  "text_pages": [1, 2, 3],
+  "tables_pages": [4],
+  "warnings": []
+}
+```
 
-1. **扫描版PDF**: 上述方法只能提取文本层，扫描版PDF需要先OCR
-2. **密码保护**: 需要先移除密码或使用 `fitz.open(password="xxx")`
-3. **大文件**: 超过100MB的PDF建议分页读取，避免内存溢出
+如果文本为空、页数异常或存在扫描页，把问题写入 `warnings`，不要静默忽略。

@@ -30,11 +30,15 @@ provider = "codex"
 
 [codex]
 bin = "codex"
-sandbox = "workspace-write"
+sandbox = "danger-full-access"
 model = "gpt-5.5"
 timeout_seconds = 1800
 max_concurrent_runs = 1
 ```
+
+:::caution
+`danger-full-access` 会让 Codex provider 使用 full-access/bypass 模式，适合可信本地 daemon。不要在不可信仓库、共享机器或未审计任务中随意启用；如改为更严格 sandbox，请预期部分 pku3b、文件读取或后台 loop 行为需要额外处理权限。
+:::
 
 :::caution
 不要提交真实的 `configs/config.toml`、飞书 secret、用户 open id、token 或登录凭据。
@@ -54,6 +58,10 @@ max_concurrent_runs = 1
     "mode": "fixed",
     "model": "gpt-5.5",
     "reasoning_effort": "xhigh"
+  },
+  "codex": {
+    "sandbox": "danger-full-access",
+    "timeout_seconds": 1800
   },
   "loops": [
     {

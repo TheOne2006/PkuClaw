@@ -15,7 +15,7 @@
 
 - [ ] `python -m compileall pkuclaw scripts`
 - [ ] `python -m unittest discover`
-- [ ] Docs build if docs changed: `cd docs-site && npm install && npm run build`
+- [ ] Docs build if docs changed: `cd docs-site && npm ci && npm run build`
 - [ ] Not run / not applicable: <!-- explain -->
 
 ## Risk / rollback
