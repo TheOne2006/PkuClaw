@@ -3,6 +3,9 @@
 .env.*
 !.env.example
 configs/config.toml
+configs/runtime/runtime.json
+configs/runtime/runtime.json.*
+configs/runtime/backups/
 
 # Runtime state
 data/

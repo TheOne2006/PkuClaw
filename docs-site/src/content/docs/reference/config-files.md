@@ -22,7 +22,8 @@ configs/config.toml  # 本地真实配置，默认不提交
 
 ```text
 configs/runtime/
-  runtime.json
+  runtime.example.json
+  runtime.json          # local, ignored
   events.json
   prompts.json
   skills.json
@@ -31,7 +32,8 @@ configs/runtime/
 
 | 文件 | 作用 |
 | --- | --- |
-| `runtime.json` | agent/codex/loops/notifications 的热加载配置。 |
+| `runtime.example.json` | agent/codex/loops/notifications 的可提交模板。 |
+| `runtime.json` | 本地热加载配置；Git 忽略，可能包含 channel 目标标识。 |
 | `events.json` | realtime quick action catalog 与 channel mapping。 |
 | `prompts.json` | realtime/loop prompt 模板。 |
 | `skills.json` | skill catalog 元数据和依赖。 |
