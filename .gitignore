@@ -3,6 +3,9 @@
 .env.*
 !.env.example
 configs/config.toml
+configs/runtime/runtime.json
+configs/runtime/runtime.json.*
+configs/runtime/backups/
 
 # Runtime state
 data/
@@ -27,8 +30,11 @@ Thumbs.db
 
 # Local Codex/dev worktrees
 .dev/
-# Node / Astro docs site
+# Node / docs site
 docs-site/node_modules/
 docs-site/dist/
 docs-site/.astro/
+docs-site/.next/
+docs-site/.source/
+docs-site/out/
 docs-site/test-results/

@@ -30,11 +30,15 @@ provider = "codex"
 
 [codex]
 bin = "codex"
-sandbox = "workspace-write"
+sandbox = "danger-full-access"
 model = "gpt-5.5"
 timeout_seconds = 1800
 max_concurrent_runs = 1
 ```
+
+:::caution
+`danger-full-access` 会让 Codex provider 使用 full-access/bypass 模式，适合可信本地 daemon。不要在不可信仓库、共享机器或未审计任务中随意启用；如改为更严格 sandbox，请预期部分 pku3b、文件读取或后台 loop 行为需要额外处理权限。
+:::
 
 :::caution
 不要提交真实的 `configs/config.toml`、飞书 secret、用户 open id、token 或登录凭据。
@@ -42,7 +46,9 @@ max_concurrent_runs = 1
 
 ## Runtime 配置
 
-`configs/runtime/runtime.json` 描述可热加载的 agent、Codex、loop 和通知策略：
+`configs/runtime/runtime.example.json` 是可提交模板；复制为本地
+`configs/runtime/runtime.json` 后，daemon 会热加载其中的 agent、Codex、loop
+和通知策略：
 
 ```json
 {
@@ -52,6 +58,10 @@ max_concurrent_runs = 1
     "mode": "fixed",
     "model": "gpt-5.5",
     "reasoning_effort": "xhigh"
+  },
+  "codex": {
+    "sandbox": "danger-full-access",
+    "timeout_seconds": 1800
   },
   "loops": [
     {
@@ -88,7 +98,8 @@ max_concurrent_runs = 1
 | 类型 | 示例 | 是否热加载 | Agent 是否应直接修改 |
 | --- | --- | --- | --- |
 | 启动期配置 | `configs/config.toml` | 否 | 通常不应修改 |
-| Runtime 配置 | `configs/runtime/runtime.json` | 是 | 任务明确要求时可以 |
+| Runtime 配置模板 | `configs/runtime/runtime.example.json` | 否 | 可以作为模板更新 |
+| Runtime 本地配置 | `configs/runtime/runtime.json` | 是 | 任务明确要求时可以，但不要提交 |
 | Quick actions | `configs/runtime/events.json` | 是 | 可以 |
 | Prompt 模板 | `configs/runtime/prompts.json` | 是 | 可以，但要谨慎 |
 | Skill Catalog | `configs/runtime/skills.json` 与 `skills/**` | 是 | 可以 |

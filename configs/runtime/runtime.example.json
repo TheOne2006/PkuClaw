@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "agent": {
+    "provider": "codex",
+    "mode": "fixed",
+    "model": "gpt-5.5",
+    "reasoning_effort": "xhigh"
+  },
+  "codex": {
+    "sandbox": "danger-full-access",
+    "timeout_seconds": 1800
+  },
+  "loops": [
+    {
+      "id": "sync_notices",
+      "enabled": true,
+      "interval_seconds": 900,
+      "prompt": "检查课程状态、教学网通知和本地数据。如果没有重要变化，保持静默；如果发现重要变化，使用 Channel Outbox Skill 发送简洁 text/image/file 通知用户。",
+      "skill_names": [
+        "tasks/sync-notices.md"
+      ],
+      "sink_mode": "silent",
+      "default_channel": null,
+      "default_target_type": null,
+      "default_target_id": null,
+      "prevent_overlap": true,
+      "max_concurrent_runs": null
+    }
+  ],
+  "notifications": {
+    "policy": "important_only",
+    "default_channel": null,
+    "default_target_type": null,
+    "default_target_id": null
+  }
+}

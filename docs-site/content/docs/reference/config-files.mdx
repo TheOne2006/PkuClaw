@@ -15,14 +15,15 @@ configs/config.toml  # 本地真实配置，默认不提交
 | `[app]` | app 名称、数据目录、runtime 配置目录、时区。 |
 | `[feishu]` | 飞书 app id、secret 环境变量名、事件模式。 |
 | `[agent]` | 默认 provider。 |
-| `[codex]` | Codex CLI 路径、sandbox、model、timeout、并发数。 |
+| `[codex]` | Codex CLI 路径、sandbox、model、timeout、并发数；示例默认 `danger-full-access`，仅用于可信本地 daemon。 |
 | `[notify_queue]` | outbox queue 目录和扫描间隔。 |
 
 ## Runtime 文件
 
 ```text
 configs/runtime/
-  runtime.json
+  runtime.example.json
+  runtime.json          # local, ignored
   events.json
   prompts.json
   skills.json
@@ -31,7 +32,8 @@ configs/runtime/
 
 | 文件 | 作用 |
 | --- | --- |
-| `runtime.json` | agent/codex/loops/notifications 的热加载配置。 |
+| `runtime.example.json` | agent/codex/loops/notifications 的可提交模板。 |
+| `runtime.json` | 本地热加载配置；Git 忽略，可能包含 channel 目标标识，可覆盖 Codex sandbox/timeout。 |
 | `events.json` | realtime quick action catalog 与 channel mapping。 |
 | `prompts.json` | realtime/loop prompt 模板。 |
 | `skills.json` | skill catalog 元数据和依赖。 |
@@ -65,3 +67,7 @@ uv run pkuclaw daemon
 # 启动 realtime debug 入口
 uv run pkuclaw realtime feishu
 ```
+
+## 文档/代码差异报告
+
+维护者可查看仓库根目录的 `docs/DOC_CODE_GAPS.zh.md`，了解当前文档与代码之间仍需决策的 gap。
