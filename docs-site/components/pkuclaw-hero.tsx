@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { GitBranch, Radio, Repeat2, Settings2 } from 'lucide-react';
 import { PkuClawLogoCard } from '@/components/pkuclaw-logo-card';
 import { PkuClawStarfield } from '@/components/pkuclaw-starfield';
-import { siteConfig } from '@/lib/layout.shared';
+import { siteConfig, withBasePath } from '@/lib/layout.shared';
 
 const features = [
   {
@@ -28,7 +28,7 @@ export function PkuClawHero() {
       <PkuClawStarfield />
       <nav className="pkuclaw-home__nav" aria-label="PkuClaw">
         <Link href="/" className="pkuclaw-home__brand">
-          <span className="pkuclaw-home__brand-mark">爪</span>
+          <span className="pkuclaw-home__brand-mark"><img src={withBasePath('/icon-192.png')} alt="" width={32} height={32} /></span>
           <span>PkuClaw</span>
         </Link>
         <div className="pkuclaw-home__nav-links">

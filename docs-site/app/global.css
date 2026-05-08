@@ -145,6 +145,14 @@ samp {
   box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
 }
 
+.pkuclaw-home__brand-mark img {
+  width: 1.82rem;
+  height: 1.82rem;
+  border-radius: 0.56rem;
+  object-fit: contain;
+  filter: drop-shadow(0 0 8px rgba(243, 221, 176, 0.18));
+}
+
 .pkuclaw-home__nav-links a {
   border: 1px solid transparent;
   border-radius: 999px;
@@ -349,6 +357,15 @@ samp {
   z-index: -1;
   overflow: hidden;
   pointer-events: none;
+}
+
+.pkuclaw-starfield__canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.74;
+  mix-blend-mode: screen;
 }
 
 .pkuclaw-starfield__mesh {
