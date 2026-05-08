@@ -56,6 +56,14 @@ configs/runtime/skills/**
 - 真实通知目标、凭据和隐私数据不要进入示例或文档；
 - loop 行为默认静默，重要变化才通知。
 
+## 文档维护地图
+
+仓库级入口和审计文档在根目录：
+
+- `README.md`：中文默认入口和快速开始；
+- `docs/README.zh.md`：仓库内文档索引；
+- `docs/DOC_CODE_GAPS.zh.md`：文档与当前代码的差异报告。
+
 ## 测试命令
 
 ```bash
@@ -67,6 +75,7 @@ python -m unittest discover
 
 ```bash
 cd docs-site
+npm ci
 npm run build
 ```
 
