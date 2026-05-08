@@ -19,7 +19,7 @@ suggested_skills = ()
 sink_mode = streaming
 ```
 
-LoopManager 从 `configs/runtime/runtime.json` 读取 enabled loop，并创建：
+LoopManager 从本地 `configs/runtime/runtime.json` 读取 enabled loop，并创建：
 
 ```text
 source = loop
@@ -35,7 +35,8 @@ Quick action 是 realtime 的配置化入口，不是第三类 run。
 
 ```text
 configs/runtime/
-  runtime.json          # agent/codex/loops/notification 配置
+  runtime.example.json  # 可提交的本地 runtime 配置模板
+  runtime.json          # 不提交；agent/codex/loops/notification 配置
   events.json           # realtime quick action 配置
   prompts.json          # realtime/loop prompt 模板
   skills.json           # Skill Catalog source of truth
@@ -171,7 +172,9 @@ Agent 进程会收到这些环境变量：
 
 ## 8. runtime.json
 
-`configs/runtime/runtime.json` 热加载。通知策略支持：
+`configs/runtime/runtime.example.json` 是可提交模板；本地复制为
+`configs/runtime/runtime.json` 后由 daemon 热加载。`runtime.json` 不提交，
+因为它可能包含飞书 `open_id`/`chat_id` 等本地 channel 目标。通知策略支持：
 
 ```text
 important_only | always | silent | on_error | digest

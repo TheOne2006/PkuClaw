@@ -7,7 +7,7 @@
 让实时对话、课程通知、DDL 检查、后台循环和渠道投递，都收束到一套可审计、可维护、可扩展的本地运行时。
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](pyproject.toml)
-[![Docs](https://img.shields.io/badge/Docs-Starlight-ff5d01?logo=astro&logoColor=white)](docs-site/README.md)
+[![Docs](https://img.shields.io/badge/Docs-Fumadocs-111827)](docs-site/README.md)
 [![Runtime](https://img.shields.io/badge/Runtime-realtime%20%2B%20loop-7c3aed)](ARCHITECTURE.md)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
@@ -35,9 +35,9 @@ flowchart TD
   Channel --> Core["CoreRuntime"]
   Scheduler["LoopManager"] --> Core
   Core --> Wrapper["AgentWrapper"]
-  RuntimeFiles["configs/runtime/*\n配置 / prompt / skills"] --> Wrapper
+  RuntimeFiles["configs/runtime/*\nruntime.example 模板 / runtime.json 本地配置 / prompts / skills"] --> Wrapper
   Wrapper --> Provider["Codex Agent Provider"]
-  Provider --> Realtime["Realtime 流式卡片"]
+  Provider --> Realtime["Realtime 流式回复"]
   Provider --> Outbox["scripts/pkuclaw_outbox.py"]
   Outbox --> Queue["data/notify_queue/*"]
   Queue --> Worker["NotifyQueueWorker"]
@@ -71,7 +71,10 @@ pkuclaw --help
 
 ```bash
 cp configs/config.example.toml configs/config.toml
+cp configs/runtime/runtime.example.json configs/runtime/runtime.json
 ```
+
+`runtime.json` 是本地热加载配置，可能包含飞书 `open_id`/`chat_id` 等目标标识，默认不提交。
 
 如需启用飞书渠道，至少设置：
 
@@ -103,7 +106,8 @@ uv run pkuclaw daemon
 | 位置 | 类型 | 是否热加载 | 用途 |
 | --- | --- | --- | --- |
 | `configs/config.toml` | 启动期配置 | 否 | 数据目录、飞书凭据解析、Codex 默认配置、队列扫描间隔。 |
-| `configs/runtime/runtime.json` | Runtime 配置 | 是 | Agent/Codex 覆盖、loop、通知策略和默认投递目标。 |
+| `configs/runtime/runtime.example.json` | Runtime 模板 | 否 | 可提交的本地 runtime 配置模板。 |
+| `configs/runtime/runtime.json` | Runtime 配置 | 是 | 本地热加载配置；默认 Git 忽略，可覆盖 Agent/Codex、loop、通知策略和投递目标。 |
 | `configs/runtime/events.json` | Quick actions | 是 | 用户主动触发的 realtime 快捷任务。 |
 | `configs/runtime/prompts.json` | Prompt 模板 | 是 | realtime/loop 的模型可见规则。 |
 | `configs/runtime/skills.json` | Skill Catalog | 是 | runtime skill 元数据、依赖、适用 source 和确认边界。 |
@@ -116,7 +120,7 @@ uv run pkuclaw daemon
 - [文档索引](docs/README.zh.md)：仓库内文档的维护分工。
 - [代码/文档差异报告](docs/DOC_CODE_GAPS.zh.md)：当前审计发现的已修复项和待决策 gap。
 - [Runtime 文件说明](configs/runtime/README.md)：`configs/runtime/**` 的字段和行为。
-- [文档站](docs-site/README.md)：Astro Starlight 文档站，本地预览和构建命令。
+- [文档站](docs-site/README.md)：Next.js + Fumadocs 文档站，本地预览和构建命令。
 - [pku3b README](crates/pku3b/README.md)：PKU Blackboard / Portal raw JSON CLI。
 
 ## 🧪 开发与验证
@@ -157,7 +161,7 @@ pkuclaw/
   notify_queue/  # daemon 文件 outbox 队列 worker
 scripts/         # pkuclaw_outbox.py 等 thin client
 configs/runtime/ # 可热加载 runtime surface
-docs-site/       # Astro Starlight 文档站
+docs-site/       # Next.js + Fumadocs 文档站
 crates/pku3b/    # PKU Blackboard / Portal raw JSON CLI
 ```
 

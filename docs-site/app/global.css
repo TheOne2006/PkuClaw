@@ -1,0 +1,479 @@
+@import 'tailwindcss';
+@import 'fumadocs-ui/css/neutral.css';
+@import 'fumadocs-ui/css/preset.css';
+
+:root {
+  --pku-red: #8c1515;
+  --pku-red-bright: #b91c1c;
+  --pku-black: #09090b;
+  --pku-ink: #16110f;
+  --pku-gold: #d7b56d;
+  --pku-gold-soft: #f3ddb0;
+  --pku-paper: #fbf7f2;
+  --pku-muted: #6f5f57;
+  --fd-primary: var(--pku-red);
+  --fd-primary-foreground: #ffffff;
+  --fd-ring: var(--pku-red-bright);
+  color-scheme: light;
+}
+
+.dark {
+  --pku-paper: #0b0b10;
+  --pku-muted: #b8aba4;
+  --fd-primary: #f04444;
+  --fd-primary-foreground: #ffffff;
+  --fd-ring: #f59e9e;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  min-width: 320px;
+  background:
+    radial-gradient(circle at top left, rgba(140, 21, 21, 0.08), transparent 30rem),
+    linear-gradient(180deg, #fffaf5 0%, #fff 42%, #f8f7f6 100%);
+  color: var(--pku-ink);
+  font-family: var(--font-geist-sans), 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  text-rendering: optimizeLegibility;
+}
+
+.dark body {
+  background:
+    radial-gradient(circle at top left, rgba(185, 28, 28, 0.15), transparent 32rem),
+    linear-gradient(180deg, #09090b 0%, #0c0a0a 45%, #111114 100%);
+  color: #f7f2ed;
+}
+
+code,
+pre,
+kbd,
+samp {
+  font-family: var(--font-geist-mono), 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+}
+
+::selection {
+  background: rgba(185, 28, 28, 0.22);
+}
+
+.pkuclaw-nav-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-weight: 760;
+  letter-spacing: -0.02em;
+}
+
+.pkuclaw-nav-title img {
+  border-radius: 0.7rem;
+  box-shadow: 0 10px 26px rgba(140, 21, 21, 0.25);
+}
+
+.pkuclaw-doc-page-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 0.75rem;
+}
+
+.fd-docs article,
+.fd-docs [data-docs-body] {
+  letter-spacing: 0.005em;
+}
+
+.pkuclaw-home {
+  position: relative;
+  isolation: isolate;
+  min-height: 100vh;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 18% 18%, rgba(185, 28, 28, 0.24), transparent 24rem),
+    radial-gradient(circle at 80% 22%, rgba(215, 181, 109, 0.14), transparent 26rem),
+    linear-gradient(145deg, #07070a 0%, #120909 46%, #050506 100%);
+  color: #fffaf4;
+}
+
+.pkuclaw-home::after {
+  position: absolute;
+  inset: auto 8% 0;
+  z-index: -1;
+  height: 28rem;
+  content: '';
+  background: radial-gradient(ellipse at center, rgba(140, 21, 21, 0.2), transparent 68%);
+  filter: blur(26px);
+}
+
+.pkuclaw-home__nav {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: min(1120px, calc(100% - 2rem));
+  margin: 0 auto;
+  padding: 1.25rem 0;
+}
+
+.pkuclaw-home__brand,
+.pkuclaw-home__nav-links {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.pkuclaw-home__brand {
+  color: #fff;
+  font-size: 1rem;
+  font-weight: 780;
+  text-decoration: none;
+}
+
+.pkuclaw-home__brand-mark {
+  display: grid;
+  width: 2.25rem;
+  height: 2.25rem;
+  place-items: center;
+  border: 1px solid rgba(243, 221, 176, 0.3);
+  border-radius: 0.85rem;
+  background: linear-gradient(135deg, rgba(140, 21, 21, 0.95), rgba(22, 17, 15, 0.82));
+  color: var(--pku-gold-soft);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+}
+
+.pkuclaw-home__brand-mark img {
+  width: 1.82rem;
+  height: 1.82rem;
+  border-radius: 0.56rem;
+  object-fit: contain;
+  filter: drop-shadow(0 0 8px rgba(243, 221, 176, 0.18));
+}
+
+.pkuclaw-home__nav-links a {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: rgba(255, 250, 244, 0.76);
+  font-size: 0.94rem;
+  padding: 0.45rem 0.8rem;
+  text-decoration: none;
+  transition: border-color 180ms ease, color 180ms ease, background 180ms ease;
+}
+
+.pkuclaw-home__nav-links a:hover {
+  border-color: rgba(243, 221, 176, 0.22);
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+}
+
+.pkuclaw-hero {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(260px, 0.72fr);
+  gap: clamp(2rem, 6vw, 5rem);
+  align-items: center;
+  width: min(1120px, calc(100% - 2rem));
+  min-height: 62vh;
+  margin: 0 auto;
+  padding: clamp(4rem, 8vw, 7.5rem) 0 clamp(2.5rem, 5vw, 4rem);
+}
+
+.pkuclaw-hero__eyebrow {
+  width: fit-content;
+  margin: 0 0 1rem;
+  border: 1px solid rgba(243, 221, 176, 0.22);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--pku-gold-soft);
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  padding: 0.45rem 0.75rem;
+  text-transform: uppercase;
+}
+
+.pkuclaw-hero h1 {
+  margin: 0;
+  color: #fff;
+  font-size: clamp(4.25rem, 10vw, 8.6rem);
+  font-weight: 860;
+  letter-spacing: -0.095em;
+  line-height: 0.86;
+  text-wrap: balance;
+}
+
+.pkuclaw-hero__tagline {
+  max-width: 44rem;
+  margin: 1.45rem 0 0;
+  color: rgba(255, 250, 244, 0.78);
+  font-size: clamp(1.12rem, 2.1vw, 1.55rem);
+  line-height: 1.85;
+}
+
+.pkuclaw-hero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.85rem;
+  margin-top: 2.1rem;
+}
+
+.pkuclaw-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 2.75rem;
+  border-radius: 999px;
+  font-weight: 760;
+  padding: 0 1.18rem;
+  text-decoration: none;
+  transition: transform 180ms ease, border-color 180ms ease, background 180ms ease, box-shadow 180ms ease;
+}
+
+.pkuclaw-button:hover {
+  transform: translateY(-1px);
+}
+
+.pkuclaw-button--primary {
+  border: 1px solid rgba(243, 221, 176, 0.4);
+  background: linear-gradient(135deg, #b91c1c, #7f1515 60%, #5f0f0f);
+  color: white;
+  box-shadow: 0 16px 38px rgba(140, 21, 21, 0.38);
+}
+
+.pkuclaw-button--ghost {
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 250, 244, 0.9);
+}
+
+.pkuclaw-button--ghost:hover {
+  border-color: rgba(243, 221, 176, 0.34);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.pkuclaw-logo-card {
+  position: relative;
+  display: grid;
+  min-height: 24rem;
+  place-items: center;
+}
+
+.pkuclaw-logo-card__orbit {
+  position: absolute;
+  width: min(24rem, 78vw);
+  aspect-ratio: 1;
+  border: 1px solid rgba(243, 221, 176, 0.18);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 50%, rgba(140, 21, 21, 0.14), transparent 42%),
+    conic-gradient(from 120deg, transparent, rgba(243, 221, 176, 0.22), transparent 36%, rgba(185, 28, 28, 0.28), transparent 70%);
+  filter: drop-shadow(0 20px 58px rgba(140, 21, 21, 0.22));
+  mask-image: radial-gradient(circle, transparent 49%, black 50%);
+}
+
+.pkuclaw-logo-card__inner {
+  position: relative;
+  display: grid;
+  width: min(20rem, 82vw);
+  gap: 1.15rem;
+  justify-items: center;
+  border: 1px solid rgba(243, 221, 176, 0.22);
+  border-radius: 2rem;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.055));
+  padding: 2.2rem 1.6rem 1.55rem;
+  text-align: center;
+  box-shadow:
+    0 30px 80px rgba(0, 0, 0, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(18px);
+}
+
+.pkuclaw-logo-card__inner img {
+  width: clamp(5.5rem, 17vw, 9.4rem);
+  height: auto;
+  border-radius: 1.65rem;
+  filter: drop-shadow(0 16px 28px rgba(0, 0, 0, 0.32));
+}
+
+.pkuclaw-logo-card__inner p {
+  margin: 0 0 0.25rem;
+  color: rgba(255, 250, 244, 0.55);
+  font-size: 0.82rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.pkuclaw-logo-card__inner strong {
+  color: #fffaf4;
+  font-size: 1rem;
+}
+
+.pkuclaw-feature-grid {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  width: min(1120px, calc(100% - 2rem));
+  margin: 0 auto;
+  padding: 0 0 clamp(2rem, 6vw, 5rem);
+}
+
+.pkuclaw-feature-card {
+  min-height: 12rem;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 1.35rem;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.092), rgba(255, 255, 255, 0.038));
+  padding: 1.25rem;
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.26);
+  backdrop-filter: blur(14px);
+}
+
+.pkuclaw-feature-card svg {
+  color: var(--pku-gold-soft);
+}
+
+.pkuclaw-feature-card h2 {
+  margin: 1.15rem 0 0.45rem;
+  color: #fff;
+  font-size: 1.05rem;
+  font-weight: 760;
+}
+
+.pkuclaw-feature-card p {
+  margin: 0;
+  color: rgba(255, 250, 244, 0.66);
+  line-height: 1.72;
+}
+
+.pkuclaw-starfield {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.pkuclaw-starfield__canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.74;
+  mix-blend-mode: screen;
+}
+
+.pkuclaw-starfield__mesh {
+  position: absolute;
+  inset: 0;
+  opacity: 0.36;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+  background-size: 68px 68px;
+  mask-image: radial-gradient(circle at 50% 32%, black, transparent 72%);
+}
+
+.pkuclaw-starfield__glow {
+  position: absolute;
+  width: 32rem;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  filter: blur(42px);
+  opacity: 0.38;
+}
+
+.pkuclaw-starfield__glow--red {
+  top: 10%;
+  left: 6%;
+  background: rgba(185, 28, 28, 0.56);
+}
+
+.pkuclaw-starfield__glow--gold {
+  right: 9%;
+  bottom: 14%;
+  background: rgba(215, 181, 109, 0.24);
+}
+
+.pkuclaw-starfield__lines {
+  position: absolute;
+  inset: 7% -8% auto;
+  width: 116%;
+  height: 70%;
+  opacity: 0.34;
+}
+
+.pkuclaw-starfield__lines path,
+.pkuclaw-starfield__lines circle {
+  fill: none;
+  stroke: rgba(243, 221, 176, 0.32);
+  stroke-width: 1.2;
+}
+
+.pkuclaw-starfield__lines circle {
+  fill: rgba(243, 221, 176, 0.72);
+}
+
+.pkuclaw-starfield__star {
+  position: absolute;
+  left: var(--x);
+  top: var(--y);
+  width: 2px;
+  height: 2px;
+  border-radius: 999px;
+  background: #fff8e7;
+  box-shadow: 0 0 14px rgba(243, 221, 176, 0.8);
+  opacity: 0.58;
+  animation: pkuclaw-twinkle 3.6s ease-in-out infinite;
+  animation-delay: var(--delay);
+}
+
+@keyframes pkuclaw-twinkle {
+  0%, 100% {
+    opacity: 0.3;
+    transform: scale(0.82);
+  }
+  48% {
+    opacity: 0.94;
+    transform: scale(1.18);
+  }
+}
+
+@media (max-width: 860px) {
+  .pkuclaw-hero {
+    grid-template-columns: 1fr;
+    min-height: auto;
+    padding-top: 3rem;
+  }
+
+  .pkuclaw-logo-card {
+    min-height: 18rem;
+  }
+
+  .pkuclaw-feature-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .pkuclaw-home__nav {
+    align-items: flex-start;
+  }
+
+  .pkuclaw-home__nav-links {
+    gap: 0.25rem;
+  }
+
+  .pkuclaw-hero h1 {
+    font-size: clamp(3.4rem, 24vw, 5rem);
+  }
+
+  .pkuclaw-hero__tagline br {
+    display: none;
+  }
+}

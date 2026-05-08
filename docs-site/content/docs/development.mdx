@@ -42,12 +42,17 @@ configs/runtime/prompts.json
 Runtime 文件是普通可编辑文件：
 
 ```text
-configs/runtime/runtime.json
+configs/runtime/runtime.example.json
+configs/runtime/runtime.json  # local, ignored
 configs/runtime/events.json
 configs/runtime/prompts.json
 configs/runtime/skills.json
 configs/runtime/skills/**
 ```
+
+`runtime.example.json` 是可提交模板；本地复制为 `runtime.json` 后再填写 loop
+通知目标。不要提交真实 `runtime.json`，它可能包含 `open_id`/`chat_id` 等本地
+channel 目标。
 
 修改时建议保持：
 
@@ -81,9 +86,7 @@ npm run build
 
 ## 开发 workflow
 
-<div class="pkuclaw-steps">
-  <div class="pkuclaw-step"><strong>1. 明确边界：</strong>判断修改属于 core、runtime、agents、channels 还是 scripts。</div>
-  <div class="pkuclaw-step"><strong>2. 小步提交：</strong>先改最小闭环，避免同时重构多个层。</div>
-  <div class="pkuclaw-step"><strong>3. 本地验证：</strong>运行 Python 检查，文档改动运行 Astro build。</div>
-  <div class="pkuclaw-step"><strong>4. 更新文档：</strong>行为变更同步更新 Starlight 文档和 runtime README。</div>
-</div>
+1. **明确边界**：判断修改属于 core、runtime、agents、channels 还是 scripts。
+2. **小步提交**：先改最小闭环，避免同时重构多个层。
+3. **本地验证**：运行 Python 检查；文档改动运行 Next.js/Fumadocs build。
+4. **更新文档**：行为变更同步更新 Fumadocs 文档和 runtime README。

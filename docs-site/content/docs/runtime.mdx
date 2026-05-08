@@ -18,7 +18,8 @@ CoreRuntime 不做自然语言意图分类。普通实时消息直接创建 `sou
 
 ```text
 configs/runtime/
-  runtime.json
+  runtime.example.json
+  runtime.json          # local, ignored
   events.json
   prompts.json
   skills.json
@@ -30,6 +31,8 @@ configs/runtime/
 ```
 
 这些文件是 Agent 和 operator 的编辑界面，而不是隐藏在数据库里的状态。
+其中 `runtime.example.json` 是可提交模板；本地 `runtime.json` 会被热加载但被
+Git 忽略，以避免提交 channel 目标标识。
 
 ## Prompt 构建
 

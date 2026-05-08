@@ -1,0 +1,29 @@
+---
+title: PkuClaw 文档
+description: 面向 PKU workflow 的轻量 study-agent runtime 文档入口。
+---
+
+PkuClaw 是一个 daemon-centered study-agent runtime：它把课程/通知类 workflow 拆成清晰的 realtime run、后台 loop、runtime files 和 channel-neutral outbox。
+
+<Cards>
+  <Card title="快速开始" href="/docs/quickstart" description="安装、配置，并跑起第一个本地入口。" />
+  <Card title="配置说明" href="/docs/configuration" description="区分启动期 TOML 和可热加载 runtime 文件。" />
+  <Card title="Runtime 设计" href="/docs/runtime" description="理解 realtime、loop、quick action 和 outbox 的边界。" />
+</Cards>
+
+## 核心模型
+
+| 能力 | 说明 |
+| --- | --- |
+| Realtime | 用户消息和 quick action，直接创建 `source = realtime` run 并流式回复。 |
+| Loop | 后台周期任务，默认静默，只在重要变化时通过 outbox 通知。 |
+| Runtime Files | `configs/runtime/**` 是可编辑、可 review、可热加载的 runtime surface。 |
+| Skill Catalog | Prompt 只注入目录元数据，具体 skill markdown 由 Agent 按需读取。 |
+
+## 推荐阅读顺序
+
+1. [快速开始](./quickstart/)：完成本地安装与最短启动路径。
+2. [安装](./installation/)：补齐 Python、Codex provider 和渠道依赖。
+3. [配置说明](./configuration/)：理解启动期配置与 runtime 配置边界。
+4. [Runtime 设计](./runtime/)：了解运行链路与通知模型。
+5. [开发者指南](./development/)：修改代码或 runtime 文件前的约束与验证。
