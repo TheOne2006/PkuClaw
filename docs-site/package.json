@@ -10,6 +10,8 @@
   },
   "dependencies": {
     "@astrojs/starlight": "^0.39.0",
+    "@fontsource-variable/geist": "^5.2.8",
+    "@fontsource-variable/geist-mono": "^5.2.7",
     "astro": "^6.0.0",
     "typescript": "^5.0.0"
   }

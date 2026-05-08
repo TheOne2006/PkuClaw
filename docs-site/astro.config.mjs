@@ -12,12 +12,24 @@ export default defineConfig({
     starlight({
       title: 'PkuClaw',
       description: 'PKU workflows study-agent runtime',
+      favicon: '/favicon.png',
+      locales: {
+        root: { label: '简体中文', lang: 'zh-CN' },
+      },
       logo: {
         alt: 'PkuClaw',
-        light: './src/assets/pkuclaw-logo-light.svg',
-        dark: './src/assets/pkuclaw-logo-dark.svg',
+        light: './src/assets/pkuclaw-icon.png',
+        dark: './src/assets/pkuclaw-icon.png',
       },
-      customCss: ['./src/styles/custom.css'],
+      customCss: [
+        './src/styles/custom.css',
+      ],
+      head: [
+        { tag: 'link', attrs: { rel: 'icon', type: 'image/png', href: '/PkuClaw/favicon.png' } },
+        { tag: 'link', attrs: { rel: 'apple-touch-icon', href: '/PkuClaw/icon-192.png' } },
+        { tag: 'meta', attrs: { property: 'og:image', content: 'https://theone2006.github.io/PkuClaw/og-image.png' } },
+        { tag: 'meta', attrs: { name: 'twitter:image', content: 'https://theone2006.github.io/PkuClaw/og-image.png' } },
+      ],
       social: [
         {
           icon: 'github',

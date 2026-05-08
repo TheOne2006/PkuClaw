@@ -31,3 +31,4 @@ Thumbs.db
 docs-site/node_modules/
 docs-site/dist/
 docs-site/.astro/
+docs-site/test-results/
