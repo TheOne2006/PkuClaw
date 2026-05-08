@@ -38,7 +38,8 @@ pkuclaw/
   notify_queue/ # daemon 文件通知队列 worker
 scripts/        # channel outbox queue CLI
 configs/runtime/
-  runtime.json
+  runtime.example.json
+  runtime.json          # local, ignored
   events.json
   prompts.json
   skills.json
@@ -65,7 +66,7 @@ configs/runtime/
 
 ## LoopManager
 
-`LoopManager` 热加载 `configs/runtime/runtime.json`，调度 enabled loop，并创建 `source = loop` run。
+`LoopManager` 热加载本地 `configs/runtime/runtime.json`，调度 enabled loop，并创建 `source = loop` run。
 
 Loop prompt 要求：
 

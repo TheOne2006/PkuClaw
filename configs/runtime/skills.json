@@ -8,7 +8,7 @@
         "realtime"
       ],
       "requires_confirmation": true,
-      "description": "安全调整 PkuClaw runtime.json、events、prompts、loop 和通知策略的规范；仅在用户明确要求改 runtime 时使用。",
+      "description": "安全调整 PkuClaw 本地 runtime.json、runtime.example.json、events、prompts、loop 和通知策略的规范；仅在用户明确要求改 runtime 时使用。",
       "path": "runtime/runtime-config.md"
     },
     {

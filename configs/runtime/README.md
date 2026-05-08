@@ -5,7 +5,8 @@ Agents should read or modify these files directly when the task requires it:
 
 ```text
 configs/runtime/
-  runtime.json          # hot-loaded agent/loop/notification runtime config
+  runtime.example.json  # tracked template for local runtime config
+  runtime.json          # untracked, hot-loaded agent/loop/notification runtime config
   events.json           # realtime quick action catalog
   prompts.json          # hot-loaded realtime/loop prompt templates
   skills.json           # skill catalog metadata and dependency graph
@@ -23,7 +24,7 @@ PkuClaw has only two Agent run sources:
 - `realtime`: a user message or configured quick action that should receive a direct streaming reply.
 - `loop`: a scheduled background task that stays silent unless it finds something important.
 
-There is no natural-language routing field. Ordinary realtime messages use `suggested_skills = ()` by default. Realtime quick actions use `configs/runtime/events.json`. Loop runs use the explicit `skill_names` configured on the loop entry in `runtime.json`; the daemon also suggests `tools/channel-outbox.md` for every loop run. Suggested skills are metadata, not injected full markdown bodies.
+There is no natural-language routing field. Ordinary realtime messages use `suggested_skills = ()` by default. Realtime quick actions use `configs/runtime/events.json`. Loop runs use the explicit `skill_names` configured on the loop entry in the local `runtime.json`; the daemon also suggests `tools/channel-outbox.md` for every loop run. Suggested skills are metadata, not injected full markdown bodies.
 
 ## Realtime quick actions
 
@@ -95,7 +96,7 @@ There is no model-visible card/update-card API. Feishu cards, streaming card upd
 
 Realtime runs may use image/file to deliver generated artifacts, but should not send extra text that merely duplicates the realtime running card. Loop runs use outbox only when the Notification Policy says the user should be notified.
 
-Configure the shared loop fallback target once under `notifications`:
+Copy `runtime.example.json` to `runtime.json` for local operation. Configure the shared loop fallback target once under `notifications` in local `runtime.json`:
 
 ```json
 {
@@ -108,4 +109,4 @@ Configure the shared loop fallback target once under `notifications`:
 }
 ```
 
-Individual loops may set the same three target fields to override the shared target for that loop. The provider sets `PKUCLAW_OUTBOX_QUEUE_DIR`, `PKUCLAW_RUN_ID`, and `PKUCLAW_RUN_SOURCE` for every run, plus `PKUCLAW_LOOP_ID` for loop runs. The daemon resolves a run target first, then loop override, then shared default.
+Individual loops may set the same three target fields to override the shared target for that loop. Do not commit `runtime.json`; it may contain local channel identifiers such as Feishu `open_id` or `chat_id`. The provider sets `PKUCLAW_OUTBOX_QUEUE_DIR`, `PKUCLAW_RUN_ID`, and `PKUCLAW_RUN_SOURCE` for every run, plus `PKUCLAW_LOOP_ID` for loop runs. The daemon resolves a run target first, then loop override, then shared default.

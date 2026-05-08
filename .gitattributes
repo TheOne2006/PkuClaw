@@ -1,0 +1,4 @@
+# Keep local runtime target identifiers out of rendered diffs.
+configs/runtime/runtime.json -diff
+configs/runtime/runtime.json.* -diff
+configs/runtime/backups/** -diff
