@@ -39,7 +39,7 @@ sudo apt-get install -y pkg-config libssl-dev
 
 ## 登录初始化
 
-新版不使用 `pku3b init`。首次使用或重置登录时运行：
+首次使用或重置登录时运行：
 
 ```bash
 pku3b auth login --username <id> --password <password> [--otp <code>]
@@ -72,7 +72,7 @@ pku3b --pretty timetable get
 
 如果这些命令失败，读取 JSON envelope 中的 `errors[0].code`，常见分类：
 
-- `invalid_args`：命令参数不符合新版 raw CLI；
+- `invalid_args`：命令参数不符合 raw CLI；
 - `auth_required` / `otp_required`：需要重新登录或补 OTP；
 - `network_error`：网络或上游服务不可达；
 - `parse_error`：教学网页面结构变化；

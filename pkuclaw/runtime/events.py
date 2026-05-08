@@ -24,7 +24,7 @@ class RuntimeEventSpec:
     title: str
     description: str
     task: str
-    skill_names: tuple[str, ...] = ()
+    suggested_skills: tuple[str, ...] = ()
     ack: str = "收到，我开始处理。"
     enabled: bool = True
 
@@ -141,13 +141,16 @@ def _parse_catalog(raw: Mapping[str, Any], *, path: Path) -> RuntimeEventCatalog
 def _parse_event(item: Mapping[str, Any], *, index: int) -> RuntimeEventSpec:
     event_id = normalize_event_id(_required_str(item, "id"))
     task = _required_str(item, "task")
-    skill_names = tuple(normalize_skill_name(name) for name in _optional_str_list(item, "skill_names"))
+    suggested_skills = tuple(
+        normalize_skill_name(name)
+        for name in _optional_str_list(item, "suggested_skills")
+    )
     return RuntimeEventSpec(
         id=event_id,
         title=_optional_str(item, "title") or event_id,
         description=_optional_str(item, "description") or "",
         task=task,
-        skill_names=skill_names,
+        suggested_skills=suggested_skills,
         ack=_optional_str(item, "ack") or "收到，我开始处理。",
         enabled=_optional_bool(item, "enabled", default=True),
     )

@@ -11,7 +11,7 @@ Only two Agent run sources exist:
 | `realtime` | User message or configured quick action | Answer the user directly with streaming channel UI. Ordinary messages have no preselected skills; quick actions may have suggested skills. |
 | `loop` | `LoopManager` scheduled tick | Run a configured background task. Stay silent unless important. |
 
-CoreRuntime does not classify user text into task categories. An ordinary realtime message creates `source="realtime"` and `suggested_skills=()`. A configured realtime quick action is loaded from `configs/runtime/events.json` and also creates `source="realtime"`. A loop creates `source="loop"` and uses the loop's configured `skill_names` plus the channel outbox skill as suggested skills.
+CoreRuntime does not classify user text into task categories. An ordinary realtime message creates `source="realtime"` and `suggested_skills=()`. A configured realtime quick action is loaded from `configs/runtime/events.json` and also creates `source="realtime"`. A loop creates `source="loop"` and uses the loop's configured `suggested_skills` plus the channel outbox skill as suggested skills.
 
 ## 2. Runtime files
 
@@ -34,7 +34,7 @@ Agents read or edit these files directly when needed. Runtime configuration is n
 
 ## 3. Realtime quick actions
 
-`configs/runtime/events.json` defines user-triggered quick actions. Each event has an `id`, `task`, optional `skill_names`, and display metadata. Channel adapters decide whether a platform event is UI-only, ignored/no-op, or a quick action. For quick actions they pass a clean PkuClaw `event_id` to CoreRuntime; raw platform keys may be mapped or passed through only when already equal to a configured PkuClaw id.
+`configs/runtime/events.json` defines user-triggered quick actions. Each event has an `id`, `task`, optional `suggested_skills`, and display metadata. Channel adapters decide whether a platform event is UI-only, ignored/no-op, or a quick action. For quick actions they pass a clean PkuClaw `event_id` to CoreRuntime; raw platform keys may be mapped or passed through only when already equal to a configured PkuClaw id.
 
 CoreRuntime turns a configured event into a normal streaming realtime run. This preserves the two-source model: quick actions are realtime, not a third run type.
 
@@ -49,7 +49,7 @@ CoreRuntime turns a configured event into a normal streaming realtime run. This 
 - `allowed_sources`
 - `requires_confirmation`
 
-AgentWrapper renders the catalog into prompts. Skill bodies are not injected by default. Loop suggestions list relevant skill metadata only; the Agent decides which files to open.
+AgentWrapper renders the catalog into prompts. Skill bodies are not injected by default. Suggested skills list relevant skill metadata only; the Agent decides which files to open.
 
 If `skills.json` is missing or invalid, the daemon keeps running with an empty catalog and a warning.
 
@@ -57,14 +57,13 @@ If `skills.json` is missing or invalid, the daemon keeps running with an empty c
 
 AgentWrapper branches by `source`:
 
-- `_build_realtime_prompt(context)` creates `# PkuClaw Realtime Task` with a short identity, reply rules, Skill Catalog, optional Suggested Skills for configured quick actions, and User Request.
-- `_build_loop_prompt(context)` creates `# PkuClaw Loop Task` with loop id, scheduled time, sink mode, notify policy, notification target, notification rules, the Channel Outbox Skill pointer, Skill Catalog, suggested skills, and Task.
+- `_build_realtime_prompt(context)` creates `# PkuClaw Realtime Task` with a short identity, reply rules, Skill Catalog, Suggested Skills, and User Request. Ordinary realtime messages render Suggested Skills as `- none`; configured quick actions may provide explicit suggestions.
+- `_build_loop_prompt(context)` creates `# PkuClaw Loop Task` with loop id, scheduled time, sink mode, notify policy, notification target, notification rules, Skill Catalog, suggested skills, and Task.
 
 The wording/templates for both prompts are not hardcoded in `AgentWrapper`.
 They are hot-read from `configs/runtime/prompts.json` on each prompt build.
 Code only provides named variables such as `skill_catalog`, `user_request`,
-`loop_id`, and `channel_outbox_skill`; reusable prompt fragments such as
-the realtime suggested-skills section also live in `prompts.json`.
+`suggested_skills`, `loop_id`, `scheduled_at`, and `notification_target`.
 
 Realtime prompts do not include run ids, source labels, provider settings, repository paths, runtime paths, recent runs, outbox script bodies, or full skill markdown bodies.
 

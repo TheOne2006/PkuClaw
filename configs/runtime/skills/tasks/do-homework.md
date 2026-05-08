@@ -1,9 +1,9 @@
 ---
 name: pkuclaw-task-do-homework
-description: 处理 PKU 课程作业的 dry-run、解析、解题、渲染和提交前确认；提交必须由用户明确授权
+description: 处理 PKU 课程作业的解析、解题、渲染和提交前确认；提交必须由用户明确授权
 ---
 
-# 任务：处理作业（默认 dry-run）
+# 任务：处理作业
 
 本 skill 只用于 `realtime`。作业提交、覆盖文件、下载大附件、登录/登出等都属于高风险动作，必须先获得用户明确确认。Loop 不得自动执行本 skill。
 

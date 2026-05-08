@@ -1,145 +1,194 @@
 ---
 name: pkuclaw-task-write-notes
-description: 六阶段课程笔记流水线：PDF 讲义读取、Markdown 笔记、Notion 汇总、LaTeX 工程、逐章精修、补图和最终 QA
+description: 阶段化课程笔记生产线：资料获取整理、PDF 读取、Markdown 讲义、Notion 汇总、LaTeX 工程、逐章精修、补图和最终 QA。
 ---
 
 # 任务：课程笔记生成
 
-这个 task 是 PkuClaw 的课程笔记工作流。它不再是一次性“读 PDF 后生成一份摘要”，而是一个可暂停、可恢复、可审计的六阶段笔记生产线。
+这个 task 是 PkuClaw 的课程笔记生产线。它的默认完成定义不是“交付一份汇总 Markdown”，而是产出可编译的 LaTeX 讲义工程和 `note.pdf`。如果用户只明确要求 quick summary，才可以降级；降级时仍不能冒充完整 write-notes 交付。
 
-默认完成定义不是“交付一份汇总 Markdown”，而是产出可编译的 LaTeX 讲义工程和 `note.pdf`。如果用户只明确要求 quick summary，才可以降级；降级时仍不能冒充完整 write-notes 交付。
+本任务默认采用 **Main Agent + sub-agent/worker** 的编排模型：Main Agent 主要负责监督、分派、验收、风险确认和最终交付；各阶段 sub-agent/worker 负责实际资料整理、阅读、写作、构建、补图和 QA。
 
-它可以被三种入口调用：
+## Agent 编排模型
 
-- CLI：`pkuclaw notes <course>`
-- 飞书 Bot：例如“继续生成多智能体基础笔记”
-- Codex Worker：后台执行长任务，并把阶段状态写回 PkuClaw job store
+Main Agent 是 Coordinator / Supervisor，职责是：
 
-旧版 `write-notes.md` 中的 PDF 读取、Markdown 组织、Pandoc/LaTeX 踩坑经验仍然保留为实现参考；新的主流程以“阶段门控”为核心。
+- 理解用户目标和输入线索；
+- 确定或批准本次课程工作区 `{course_dir}`；
+- 按阶段派发同等级 sub-agent/worker；
+- 为每个 worker 指定清晰的读写边界；
+- 审查阶段输出，发现冲突或缺失时要求返工；
+- 处理登录、验证码、覆盖、删除、重命名、下载超大附件、安装依赖等需要用户确认的风险；
+- 汇总最终交付报告。
 
-## 总原则
+各阶段 sub-agent/worker 是实际执行者。默认情况下，sub-agent/worker 应继承 Main Agent 的模型、reasoning effort、工具能力、sandbox 和必要上下文；不得为了速度或成本自动降级。只有宿主环境不支持 sub-agent，或用户/runtime 明确要求串行执行时，Main Agent 才可以自行串行完成这些阶段，并必须在最终报告中说明。
 
-1. **阶段隔离**：每个阶段只做本阶段允许的事情，不提前生成后续产物。
-2. **先盘点再写入**：阶段 0 只检查结构，不修改文件。
-3. **Markdown 与 LaTeX 分离**：先生成中文 Markdown 讲义，再搭建 LaTeX 工程。
-4. **LaTeX 精修与补图分离**：阶段 4 只精修章节结构和文字，阶段 5 才补真实图片。
-5. **来源可追溯**：每份笔记、每张图、每个章节都保留来源 PDF 文件名；不在正文里保留页码噪声。
-6. **内容不幻觉**：不要凭空添加原讲义没有的定理、结论、例子；必要补充必须标注“补充理解”。
-7. **可恢复**：每阶段完成后更新阶段报告，后续可从最近完成阶段继续。
-8. **0-4 阶段默认连续推进**：阶段 0、1、2、3、4 是生产流水线的内部检查点，不需要逐阶段等待用户验收；只有遇到覆盖已有重要成果、下载大附件/回放、凭据/网络修复、模板大改、删除文件等高风险动作时才停下确认。
-9. **Sub-agent 只是执行策略**：本 skill 可以指导支持 sub-agent/worker 的宿主把 PDF 读取、Markdown 写作、LaTeX 构建、章节精修拆开并行；是否实际开启由宿主能力和授权决定。没有 sub-agent 能力时必须串行完成同一流程。
+并行执行时必须指定互不冲突的写入范围；一个 worker 不得修改其他 worker 负责的文件，除非 Main Agent 明确批准。
 
-## 推荐目录结构
+## 输入与课程工作区
 
-课程目录由调用方传入，记为 `{course_dir}`。例如：
+用户输入可以是课程名、课程目录、教学网页面、课程平台入口、附件线索或已有课件路径。不要假设调用方已经传入整理好的课件目录。
 
-```text
-workspace/Notes/多智能体基础
-```
+`{course_dir}` 是 Main Agent 在阶段 0 确认或创建出来的课程工作区；它不必须由用户预先提供，也可以是本次任务的临时工作区：
 
-目标结构：
+- 如果用户提供了现成课程目录，阶段 0 在该目录内整理或建立映射；
+- 如果用户只提供课程名或课程平台入口，阶段 0 负责创建或确认课程工作区；
+- 如果用户没有指定目录，Main Agent 可以选择一个安全的默认/临时工作区，例如当前运行允许写入的位置下的 `pkuclaw-notes/<course_slug>/`，并在阶段 0 报告中写明；
+- 如果只是快速试跑、资料尚未完全确认或持久保存位置未知，可以先使用临时 `{course_dir}`，后续需要长期保存时再由 Main Agent 迁移或复制到用户确认的位置；
+- 只有在需要写入受限目录、覆盖已有成果、迁移/移动用户原文件，或无法确定课程身份时，才需要停下向用户确认；
+- 如果课程目录已有不同结构，阶段 0 只整理本次工作所需的副本或映射，不擅自移动、删除或覆盖用户原文件。
+
+目标结构是阶段输出目标，不是调用方必须预先准备的结构：
 
 ```text
 {course_dir}/
-├── lectures/                      # 原始 PDF，若已有其他名称，阶段 0 只报告不移动
+├── lectures/                      # 阶段 0 整理出的原始 PDF 副本或工作副本
+├── course-note/                   # 阶段 0 从 runtime skill 复制的 LaTeX 模板副本
+│   ├── README.md
+│   ├── note.tex                   # 模板文件，不是最终主入口
+│   └── chapter.tex                # chapter 模板文件
 ├── notes_md/                      # 每个 PDF 对应一份中文 Markdown 讲义
 ├── chapters/                      # 每个 Lecture 对应一份 LaTeX chapter
 ├── figures/                       # 裁图或重绘图片
 │   └── FIGURES.md                 # 图片来源表
 ├── SUMMARY.md                     # Markdown 阶段总表
 ├── README.md                      # LaTeX 工程说明
-├── note.tex                       # LaTeX 主入口
+├── note.tex                       # LaTeX 主入口，由模板渲染得到
 ├── note.pdf                       # 编译产物
-├── {course_name}_汇总笔记.md       # Notion 用汇总 Markdown
-└── .pkuclaw/
-    └── note_job.json              # 阶段状态、输入 hash、输出清单
+└── {course_name}_汇总笔记.md       # Notion 用汇总 Markdown
 ```
 
-如果课程目录已经有不同结构，阶段 0 只提出映射建议，不擅自移动用户文件。
+`course-note/` 的源模板位于：
 
-## 阶段状态
-
-PkuClaw Core 可以把状态写入 `{course_dir}/.pkuclaw/note_job.json`：
-
-```json
-{
-  "course": "多智能体基础",
-  "current_phase": 2,
-  "auto_run_until_phase": 4,
-  "needs_user_action": false,
-  "source_pdfs": [
-    {
-      "file": "lecture01.pdf",
-      "sha256": "...",
-      "lecture": "Lecture 1",
-      "title": "..."
-    }
-  ],
-  "outputs": {
-    "notes_md": [],
-    "chapters": [],
-    "figures": []
-  },
-  "last_report": "..."
-}
+```text
+configs/runtime/skills/tasks/course-note/
 ```
 
-这个文件是运行状态，不是正文内容；如果没有 PkuClaw Core，手工执行时可只在最终报告里说明阶段进度。
+阶段 0 应把该模板目录复制到 `{course_dir}/course-note/`，后续阶段再从课程目录中的模板副本渲染 `note.tex` 和 `chapters/*.tex`。不要 `mv`、删除或修改 runtime skill 中的源模板。
 
-## 阶段 0：盘点，不动文件
+## 阶段报告与可恢复
 
-阶段 0 只检查文件结构，不修改任何文件。阶段 0 报告是内部盘点和可恢复记录，不是默认暂停点；除非发现高风险动作需要用户确认，否则阶段 0 完成后继续阶段 1。
+每个阶段完成后，worker 向 Main Agent 返回阶段报告。Main Agent 负责保留阶段进度、输出清单、风险和遗留问题。
 
-必须检查：
+不要把阶段状态写成 PkuClaw Core 的固定契约；当前 workflow 不要求 CoreRuntime 自动维护课程目录内的阶段状态 JSON。如果某次运行确实需要可恢复状态，可以由 Agent 自己维护轻量工作记录，或只在最终报告中说明阶段进度。
 
-1. 原始讲义 PDF 在哪里；
-2. 是否已有 Markdown 笔记；
-3. 是否已有 LaTeX 模板或 `note.tex`；
-4. 是否已有 `chapters/`、`figures/`、`README.md`、`SUMMARY.md`；
-5. 是否有可参考模板，例如相邻课程的 LaTeX 工程；
-6. 是否已有旧版 PkuClaw 输出；
-7. 是否存在疑似重复 PDF、扫描版 PDF、无文本层 PDF；
-8. 如果缺少某些结构，只提出建议，不创建。
+## 总原则
+
+1. **Main Agent 监督**：Main Agent 主要做规划、分派、审查和交付，不直接承担大量正文生产。
+2. **同等级 worker**：各阶段 sub-agent/worker 默认继承 Main Agent 的模型、reasoning effort、工具能力和必要上下文，不自动降级。
+3. **阶段隔离**：每个阶段只做本阶段允许的事情，不提前生成后续产物。
+4. **资料先整理**：阶段 0 负责获取、下载、去重、整理课件和复制模板，不只是盘点。
+5. **Markdown 与 LaTeX 分离**：先生成中文 Markdown 讲义，再搭建 LaTeX 工程。
+6. **LaTeX 精修与补图分离**：章节文字/结构精修和图片补齐分阶段执行。
+7. **来源可追溯**：每份笔记、每张图、每个章节都保留来源 PDF 文件名；正文中不保留页码噪声。
+8. **内容不幻觉**：不要凭空添加原讲义没有的定理、结论、例子；必要补充必须标注“补充理解”。
+9. **高风险确认**：覆盖、删除、移动用户原文件，安装依赖，凭据/验证码，课程回放或超大附件下载等必须交回 Main Agent 请求确认。
+10. **可恢复**：每阶段都要有报告；串行 fallback 或失败中断时要说明已完成阶段和可继续入口。
+
+## 阶段 0：资料获取、整理与模板落位
+
+负责 worker：Material Organizer。
+
+阶段 0 的目标不是“只盘点不动文件”，而是为后续生产线准备可靠输入和课程工作区。
+
+输入可以是：
+
+- 课程名；
+- 已有课程目录；
+- 教学网 / 课程平台页面；
+- 用户提供的 PDF、压缩包或附件线索；
+- 相邻课程目录或历史笔记作为模板参考。
+
+必须完成：
+
+1. 确定或创建 `{course_dir}`；如果用户未指定目录，优先创建安全的默认/临时工作区，不要仅因缺少目录就阻塞。
+2. 如果使用临时 `{course_dir}`，必须在阶段 0 报告和最终交付报告中标明，并说明后续如何迁移到用户指定位置。
+3. 定位课程课件来源；如果资料来自 PKU 教学网，先参考 `pku3b/usage.md` 的只读课程/课件索引与下载边界。
+4. 在课程已确认，且 Main Agent 已确认或创建 `{course_dir}` 后，普通讲义 PDF 附件可以作为本阶段职责下载或收集；下载结果必须落在课程工作区或 pku3b 返回的可追踪本地路径中。
+5. 遇到登录失效、验证码、OTP、凭据缺失、权限不足时，立即交回 Main Agent，不能伪造已下载结果。
+6. 将讲义 PDF 整理到 `{course_dir}/lectures/`，优先复制或保存工作副本；不要擅自移动、删除、重命名用户原文件。
+7. 对课件去重，识别疑似重复版本、缺失 lecture、扫描版 PDF、无文本层 PDF、损坏文件和异常大小文件。
+8. 统一工作副本命名，命名应稳定、可读，并尽量保留 lecture 顺序，例如 `lecture01_intro.pdf`。
+9. 创建后续阶段需要的基础目录：`notes_md/`、`chapters/`、`figures/`。
+10. 从 `configs/runtime/skills/tasks/course-note/` 复制模板目录到 `{course_dir}/course-note/`；如果目标模板副本已存在，只能在确认它是本次运行生成或获得 Main Agent 批准后覆盖。
+11. 检查是否已有 `note.tex`、`chapters/*.tex`、`notes_md/*.md`、`README.md`、`SUMMARY.md` 等用户成果；不得覆盖，必须记录并交给 Main Agent 决策。
+12. 生成阶段 0 报告，列出课程工作区、课件清单、模板副本、已有成果、异常和风险。
 
 阶段 0 报告格式：
 
 ```markdown
-## 阶段 0 盘点报告
+## 阶段 0 资料整理报告
 
-- 课程目录：
-- 原始 PDF 列表：
-- 已有 Markdown：
-- 已有 LaTeX 工程：
-- 可参考模板：
-- 建议输出结构：
-- 后续阶段会创建或修改的文件：
-- 风险：
+- 课程工作区：
+- 工作区类型：用户指定 / 默认创建 / 临时
+- 如为临时工作区，后续迁移方式：
+- 资料来源：
+- 已下载/收集 PDF：
+- lectures/ 工作副本：
+- course-note 模板副本：
+- 已有用户成果：
+- 缺失或疑似重复课件：
+- 扫描版/无文本层/损坏 PDF：
+- 后续阶段写入边界：
+- 需要用户确认的风险：
 ```
+
+阶段 0 允许：
+
+- 创建 `{course_dir}` 和本任务需要的子目录；
+- 在课程和 `{course_dir}` 已确认或已创建后，下载或收集普通讲义 PDF；
+- 复制用户原始 PDF 到 `lectures/` 作为工作副本；
+- 复制 `course-note` 模板目录到课程工作区；
+- 写阶段报告或清单。
 
 阶段 0 禁止：
 
-- 转换 PDF；
-- 生成笔记；
-- 创建目录；
-- 写 LaTeX；
-- 裁图。
+- 生成讲义正文；
+- 转换 PDF 内容为 Markdown 或 LaTeX；
+- 裁图、补图或重绘；
+- 覆盖用户已有笔记、LaTeX、图片或 README；
+- 移动、删除、重命名用户原始文件；
+- 修改 runtime skill 源模板。
 
-阶段 0 后默认继续：
+阶段 0 后默认继续到阶段 1；只有发现高风险动作或无法获取课件时才暂停等待用户。
 
-- 普通新建 `notes_md/`、`SUMMARY.md`、`chapters/`、`figures/`、`README.md`、`note.tex`；
-- 普通覆盖由本次 job 刚生成的中间文件；
-- 使用默认 LaTeX 模板。
+## 阶段 1：PDF 读取与结构化提取
 
-阶段 0 后必须停下确认：
+负责 worker：PDF Reader。
 
-- 覆盖用户已有 `note.tex`、`chapters/*.tex`、`notes_md/*.md` 或手写内容；
-- 移动、删除、重命名原始课件；
-- 下载大附件、课程回放或执行任何远端写操作；
-- 修改 runtime 配置、安装系统依赖或修复凭据。
+读取 `{course_dir}/lectures/` 下的讲义 PDF；如果阶段 0 只建立了外部映射，也可以读取阶段 0 报告中确认的 PDF 路径。
 
-## 阶段 1：逐个 PDF 生成中文 Markdown 讲义
+目标是完整理解每份 PDF 的内容结构，而不是直接写 Markdown 笔记。
 
-读取 `{course_dir}` 下所有讲义 PDF。PDF 可以来自 `lectures/`，也可以来自阶段 0 确认的其他目录。
+要求：
+
+1. 必须完整阅读每个 PDF，不要只做摘要。
+2. 识别 Lecture 标题、章节结构、定义、定理/结论、例子、证明、算法、表格、图示和公式。
+3. 记录图表的内容意义和所在位置，供阶段 6 补图使用；正文笔记中不要保留页码噪声。
+4. 表格多的 PDF 应尽量提取表格结构。
+5. 扫描版或无文本层 PDF 必须报告 OCR 需求，不能假装已经完整读取。
+6. 如果 PDF 提取乱码、缺页、损坏或顺序异常，必须报告给 Main Agent。
+7. 输出结构化阅读报告，交给 Markdown Writer 和 Main Agent。
+
+PDF 读取参考：
+
+```python
+import fitz
+
+doc = fitz.open(pdf_path)
+texts = []
+for page in doc:
+    texts.append(page.get_text())
+doc.close()
+```
+
+表格多的 PDF 可补充使用 `pdfplumber`。扫描版 PDF 需要 OCR；需要安装系统依赖或调用外部服务时，必须交回 Main Agent 确认。
+
+## 阶段 2：逐个 PDF 生成中文 Markdown 讲义
+
+负责 worker：Markdown Writer。
+
+根据阶段 1 的结构化阅读结果和必要的 PDF 回看，为每个 PDF 单独生成一份中文 Markdown 讲义。
 
 输出：
 
@@ -151,17 +200,16 @@ PkuClaw Core 可以把状态写入 `{course_dir}/.pkuclaw/note_job.json`：
 要求：
 
 1. 每个 PDF 单独生成一个中文 Markdown 讲义文件。
-2. 必须完整阅读每个 PDF，不要只做摘要。
-3. 按讲义逻辑重新组织成中文课堂笔记，而不是逐页机械翻译。
-4. 不保留 `Page 1`、`第 x 页`、`原讲义第 x 页` 之类页码标记。
-5. 可以合并连续页面中的同一主题。
-6. 中文为主，英文专业名词第一次出现时保留英文，例如：多智能体系统（Multi-Agent System）。
-7. 不凭空添加原讲义没有的定理、结论或例子。
-8. 如果需要补充理解，明确标注“补充理解”。
-9. 定义、定理、例子、证明、备注使用统一格式。
-10. 数学公式使用 LaTeX：行内 `$...$`，独立公式用 `$$...$$`。
-11. 图无法直接转换时，保留内容性占位：`[图：关于 xxx 的示意图]`，不要写页码。
-12. 表格尽量转为 Markdown 表格。
+2. 按讲义逻辑重新组织成中文课堂笔记，而不是逐页机械翻译。
+3. 不保留 `Page 1`、`第 x 页`、`原讲义第 x 页` 之类页码标记。
+4. 可以合并连续页面中的同一主题。
+5. 中文为主，英文专业名词第一次出现时保留英文，例如：多智能体系统（Multi-Agent System）。
+6. 不凭空添加原讲义没有的定理、结论或例子。
+7. 如果需要补充理解，明确标注“补充理解”。
+8. 定义、定理、例子、证明、备注使用统一格式。
+9. 数学公式使用 LaTeX：行内 `$...$`，独立公式用 `$$...$$`。
+10. 图无法直接转换时，保留内容性占位：`[图：关于 xxx 的示意图]`，不要写页码。
+11. 表格尽量转为 Markdown 表格。
 
 Markdown 结构：
 
@@ -199,25 +247,11 @@ Markdown 结构：
 - 是否含图占位；
 - 是否存在 PDF 提取异常。
 
-阶段 1 只生成 `notes_md/*.md` 和 `SUMMARY.md`，不要做 LaTeX。
+阶段 2 只生成 `notes_md/*.md` 和 `SUMMARY.md`，不要做 LaTeX。
 
-### PDF 读取参考
+## 阶段 3：生成 Notion 用汇总 Markdown
 
-优先使用 PyMuPDF 快速读取文本：
-
-```python
-import fitz
-
-doc = fitz.open(pdf_path)
-texts = []
-for page in doc:
-    texts.append(page.get_text())
-doc.close()
-```
-
-表格多的 PDF 可补充使用 `pdfplumber`。扫描版 PDF 需要 OCR，不能假装已经完整读取。
-
-## 阶段 2：生成 Notion 用汇总 Markdown
+负责 worker：Markdown Merger。
 
 把 `notes_md/` 下所有单独 Markdown 笔记按 Lecture 顺序合并成一个总文件。
 
@@ -243,7 +277,7 @@ doc.close()
 5. 不保留原 PDF 页码。
 6. 检查是否所有 `notes_md/*.md` 都已合并。
 
-阶段 2 报告：
+阶段 3 报告：
 
 - 合并了多少个文件；
 - 输出文件路径；
@@ -251,20 +285,25 @@ doc.close()
 - 是否发现顺序异常；
 - 是否有缺失 Lecture。
 
-## 阶段 3：搭建 LaTeX 讲义工程
+## 阶段 4：搭建 LaTeX 讲义工程
 
-优先使用 PkuClaw 默认课程笔记 LaTeX 模板：
+负责 worker：LaTeX Builder。
 
-```text
-configs/runtime/templates/latex/course-note/note.tex
-configs/runtime/templates/latex/course-note/chapter.tex
-```
-
-如果用户指定模板，则优先使用用户模板；否则再参考同一 Notes 根目录下已有课程模板。例如：
+优先使用阶段 0 已复制到课程目录中的模板副本：
 
 ```text
-workspace/Notes/自然语言处理基础
+{course_dir}/course-note/note.tex
+{course_dir}/course-note/chapter.tex
 ```
+
+如果课程目录没有模板副本，才回退读取 runtime skill 源模板：
+
+```text
+configs/runtime/skills/tasks/course-note/note.tex
+configs/runtime/skills/tasks/course-note/chapter.tex
+```
+
+如果用户指定模板，则优先使用用户模板；否则可参考同一 Notes 根目录下已有课程模板。
 
 输出或整理：
 
@@ -279,16 +318,13 @@ workspace/Notes/自然语言处理基础
 要求：
 
 1. 每个 Lecture 单独生成一个 `chapters/*.tex` 文件。
-2. 不做双重标题：`chapter` 标题可以写 Lecture 编号和主题；`section` 不要机械重复 Markdown 原编号。
-3. 每章开头只保留来源信息：
-   - 原 PDF 文件名；
-   - Lecture 几；
-   - 不写完整路径；
-   - 不写页码。
-4. 不额外生成复杂封面，除非模板已有简洁封面。
-5. 使用适合教材讲义的彩色框：定义、结论/定理、例子、备注、证明思路。
-6. 不完全套数学笔记模板里不适合的 theorem 风格；课程概念、机制、算法、例子更重要。
-7. 图暂时可以继续保留占位，统一为：
+2. `note.tex` 必须由课程目录中的模板副本或用户模板渲染得到，替换课程名、作者、学期、章节 `\input{...}` 等占位信息；不要直接把模板文件当成最终 `note.tex` 编译。
+3. 不做双重标题：`chapter` 标题可以写 Lecture 编号和主题；`section` 不要机械重复 Markdown 原编号。
+4. 每章开头只保留来源信息：原 PDF 文件名、Lecture 编号；不写完整路径，不写页码。
+5. 不额外生成复杂封面，除非模板已有简洁封面。
+6. 使用适合教材讲义的彩色框：定义、结论/定理、例子、备注、证明思路。
+7. 不完全套数学笔记模板里不适合的 theorem 风格；课程概念、机制、算法、例子更重要。
+8. 图暂时可以继续保留占位，统一为：
 
    ```latex
    \begin{figuredesc}
@@ -296,11 +332,11 @@ workspace/Notes/自然语言处理基础
    \end{figuredesc}
    ```
 
-8. 公式必须能被 `xelatex` 编译。
-9. 中文排版自然，不像自动翻译。
-10. `note.tex` 必须由默认模板或用户模板渲染得到，替换课程名、作者、学期、章节 `\input{...}` 等占位信息；不要直接把模板文件当成最终 `note.tex` 编译。
+9. 公式必须能被 `xelatex` 编译。
+10. 中文排版自然，不像自动翻译。
+11. 不能覆盖用户已有 `note.tex`、`chapters/*.tex`、`README.md`，除非 Main Agent 已确认这是本次运行产物或用户同意覆盖。
 
-LaTeX 主文件建议包含：
+LaTeX 主文件建议包含或继承这些能力：
 
 ```latex
 \documentclass[UTF8,openany]{ctexbook}
@@ -323,16 +359,18 @@ LaTeX 主文件建议包含：
 }
 ```
 
-阶段 3 必须尝试编译 `note.tex` 并记录报告，但不需要等待用户验收：
+阶段 4 必须尝试编译 `note.tex` 并记录报告，但不需要等待用户验收：
 
 - 生成了哪些文件；
 - 是否成功编译；
 - PDF 页数；
 - LaTeX log 中是否有 `Overfull`、`Underfull`、`Undefined`、`Missing`、`LaTeX Warning`。
 
-## 阶段 4：逐章精修 LaTeX
+## 阶段 5：逐章精修 LaTeX
 
-阶段 4 不补图，不裁图，不重绘图。只精修 LaTeX 结构、文字、公式、表格。
+负责 worker：Chapter Refiner。
+
+阶段 5 不补图，不裁图，不重绘图。只精修 LaTeX 结构、文字、公式、表格。
 
 每次精修 2-3 个 chapter，然后编译检查一次。全部完成后，再完整编译 `note.tex`。
 
@@ -349,16 +387,18 @@ LaTeX 主文件建议包含：
 9. 内容是否像课堂讲义，而不是机械翻译。
 10. 不删除实质内容。
 
-阶段 4 报告是内部检查点，不需要等待用户验收：
+阶段 5 报告是内部检查点，不需要等待用户验收：
 
 - 改了哪些 chapter；
 - 修复了哪些主要问题；
 - 编译是否通过；
 - 还有哪些遗留问题。
 
-## 阶段 5：一张一张看原 PDF，补齐有用图片
+## 阶段 6：一张一张看原 PDF，补齐有用图片
 
-阶段 5 专门处理图片。它必须在阶段 4 完成之后执行。
+负责 worker：Figure Curator。
+
+阶段 6 专门处理图片。它必须在阶段 5 完成之后执行。
 
 输出：
 
@@ -406,9 +446,9 @@ LaTeX 主文件建议包含：
 | lecture03_game_theory_fig001_payoff_matrix.png | 收益矩阵示意 | lecture03.pdf | 12 | 截图自 |
 ```
 
-阶段 5 完成后重新编译 `note.tex`，并抽样渲染检查 PDF 页面，确认图片不糊、不超宽、不遮挡文字。
+阶段 6 完成后重新编译 `note.tex`，并抽样渲染检查 PDF 页面，确认图片不糊、不超宽、不遮挡文字。
 
-阶段 5 报告：
+阶段 6 报告：
 
 - 共补了多少张图；
 - 其中多少张截图自原 PDF；
@@ -416,9 +456,11 @@ LaTeX 主文件建议包含：
 - `FIGURES.md` 路径；
 - `note.pdf` 是否重新编译成功。
 
-## 阶段 6：最终 QA
+## 阶段 7：最终 QA
 
-阶段 6 不新增内容，除非发现明显错误需要修复。
+负责 worker：QA Runner。
+
+阶段 7 不新增内容，除非发现明显错误需要修复。
 
 检查项目：
 
@@ -438,12 +480,18 @@ LaTeX 主文件建议包含：
 9. `FIGURES.md` 是否覆盖所有图片。
 10. `SUMMARY.md` 是否和最终章节一致。
 11. Notion 汇总 Markdown 是否存在且覆盖全部 Lecture。
+12. `course-note/` 模板副本是否仍是模板副本，最终主入口是否为根目录 `note.tex`。
 
 最终交付报告：
 
 ```markdown
 ## 笔记交付报告
 
+- 课程工作区：
+- 工作区类型：用户指定 / 默认创建 / 临时
+- 如为临时工作区，迁移建议：
+- lectures/：
+- course-note 模板副本：
 - note.pdf：
 - note.tex：
 - chapters/：
@@ -457,80 +505,49 @@ LaTeX 主文件建议包含：
 - 遗留问题：
 ```
 
-## 阶段分工建议
+## 阶段 worker 写入边界
 
-默认目标是完整跑通阶段 0-4，并在阶段 5-6 完成最终图片与 QA。执行可以串行，也可以在宿主运行时明确提供 sub-agent/worker 能力时并行拆分；这些角色是任务分工建议，不是新的 skill，也不能改变最终交付标准。
+默认目标是完整跑通阶段 0-7。阶段是内部生产检查点，不要求用户逐阶段验收；只有遇到高风险动作、无法获取资料、登录/凭据阻塞、覆盖已有成果、安装依赖或删除/移动文件时才暂停确认。
 
 并行时必须指定互不冲突的写入范围：
 
-- PDF Reader 只读原始 PDF / 提取文本；
-- Markdown Writer 只写自己负责的 `notes_md/*.md`；
-- LaTeX Builder 只写 `note.tex`、`README.md`、初版 `chapters/*.tex`；
-- Chapter Refiner 按 chapter 分片修改；
-- Figure Curator 只写 `figures/` 和替换对应章节图占位；
-- QA Runner 只做检查和最小修复。
+- Material Organizer 负责 `{course_dir}`、`lectures/`、`course-note/` 模板副本和阶段 0 报告；不得生成正文。
+- PDF Reader 只读 PDF 并输出结构化阅读报告；不得写正式笔记正文。
+- Markdown Writer 只写 `notes_md/*.md` 和 `SUMMARY.md`。
+- Markdown Merger 只写 `{course_name}_汇总笔记.md`。
+- LaTeX Builder 只写根目录 `note.tex`、`README.md`、初版 `chapters/*.tex` 和初版 `note.pdf`。
+- Chapter Refiner 按 Main Agent 分配的 chapter 分片修改；不得跨片覆盖。
+- Figure Curator 只写 `figures/`、`FIGURES.md`，并替换对应章节图占位。
+- QA Runner 做检查和最小修复；如需大改，必须交回 Main Agent 重新分派。
 
-### Coordinator
+### Material Organizer
 
-负责阶段门控、状态报告、确认哪些阶段可以执行。Coordinator 不直接写大量正文。
+负责阶段 0，获取课程资料、整理讲义 PDF、建立课程工作区、复制 `course-note` 模板副本并报告异常。在课程和 `{course_dir}` 已确认或已创建后，下载普通讲义附件属于本阶段职责；课程回放、超大附件、凭据/验证码和远端写操作必须交回 Main Agent。
 
 ### PDF Reader
 
-负责完整读取 PDF、识别标题、表格、公式、图示位置和异常页。扫描版或无法提取文本的 PDF 必须报告。
+负责阶段 1，完整读取 PDF、识别标题、表格、公式、图示位置和异常页。扫描版或无法提取文本的 PDF 必须报告。
 
 ### Markdown Writer
 
-负责阶段 1 的中文 Markdown 讲义。每个 PDF 可以一个 writer，但必须由 Coordinator 汇总检查标题、顺序和风格。
+负责阶段 2 的中文 Markdown 讲义。每个 PDF 可以一个 writer，但必须由 Main Agent 汇总检查标题、顺序和风格。
+
+### Markdown Merger
+
+负责阶段 3，把 `notes_md/` 合并成 Notion 用汇总 Markdown，不改写正文内容。
 
 ### LaTeX Builder
 
-负责阶段 3，把 Markdown 转为 `chapters/*.tex`，搭建 `note.tex` 和基础宏包。
+负责阶段 4，把 Markdown 转为 `chapters/*.tex`，从课程目录的 `course-note/` 模板副本渲染根目录 `note.tex`，并搭建基础宏包和 README。
 
 ### Chapter Refiner
 
-负责阶段 4，逐章精修。每次只处理 2-3 个 chapter，处理后编译。
+负责阶段 5，逐章精修。每次只处理 2-3 个 chapter，处理后编译。
 
 ### Figure Curator
 
-负责阶段 5，看原 PDF、裁图、重绘、写 `FIGURES.md`、插入 `\notefigure`。
+负责阶段 6，看原 PDF、裁图、重绘、写 `FIGURES.md`、插入 `\notefigure`。
 
 ### QA Runner
 
-负责阶段 6，做最终编译、引用检查、占位符检查、页码残留检查和交付报告。
-
-## 飞书 Bot 交互建议
-
-飞书消息应映射到阶段任务，而不是让用户一次性丢长 prompt。
-
-示例：
-
-```text
-用户：给多智能体基础生成笔记
-Bot：我会从阶段 0 盘点开始，默认连续推进到阶段 4，遇到覆盖已有成果或大下载等风险再停下确认。
-
-用户：继续阶段 1
-Bot：开始逐个 PDF 生成 Markdown，完成后推送 SUMMARY。
-
-用户：继续到阶段 3
-Bot：阶段 2 会先合并 Notion 版 Markdown，阶段 3 再搭 LaTeX 工程。
-```
-
-重要确认：
-
-- 阶段 0-4 不需要用户逐阶段验收；
-- 阶段 3 编译失败时可以先按默认模板做小修复；需要改用户模板或安装系统依赖时再确认；
-- 阶段 5 如果需要重绘大量图片，应确认范围；
-- 任何覆盖已有 `note.tex`、`chapters/*.tex`、`notes_md/*.md` 的操作都要先报告。
-
-## 与旧 Pandoc 流程的关系
-
-旧流程“Markdown + README.md + Pandoc 多文件渲染”仍可作为快速预览或 fallback，但不是主交付路径。
-
-使用 fallback 的条件：
-
-- 用户只需要快速预览 PDF；
-- 课程不需要正式 LaTeX 工程；
-- 本地没有可用 LaTeX 模板；
-- 阶段 3 明确失败，但 Markdown 已完整。
-
-即便使用 fallback，也必须保留 `notes_md/`、`SUMMARY.md` 和阶段报告，不允许绕过阶段 0 和阶段 1。
+负责阶段 7，做最终编译、引用检查、占位符检查、页码残留检查和交付报告。

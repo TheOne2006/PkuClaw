@@ -22,7 +22,7 @@ configs/runtime/events.json
 | `title` | 展示标题。 |
 | `description` | 展示描述。 |
 | `task` | 触发后传给 Agent 的用户任务。 |
-| `skill_names` | 建议 Agent 优先阅读的 skill。 |
+| `suggested_skills` | 建议 Agent 优先阅读的 skill。 |
 | `ack` | 渠道收到点击后的短提示。 |
 
 ## 示例
@@ -34,7 +34,7 @@ configs/runtime/events.json
   "title": "查看本周 DDL",
   "description": "快速查看未来一周课程 DDL 和需要处理的事项。",
   "task": "查看未来一周课程 DDL、未完成作业和需要处理的学习事项，并给出简洁优先级建议。",
-  "skill_names": ["tasks/sync-notices.md"],
+  "suggested_skills": ["tasks/sync-notices.md"],
   "ack": "正在查看本周 DDL。"
 }
 ```

@@ -34,7 +34,7 @@ configs/runtime/prompts.json
 - realtime prompt 不包含 loop-only 信息；
 - realtime prompt 不包含通知脚本；
 - loop prompt 不复用 realtime 回复规则；
-- loop prompt 指向 Channel Outbox Skill；
+- loop prompt 通过 Skill Catalog / Suggested Skills 暴露 Channel Outbox Skill；
 - Skill Catalog 来自 `configs/runtime/skills.json`。
 
 ## Runtime 修改

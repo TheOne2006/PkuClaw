@@ -9,7 +9,7 @@ description: pku3b raw-only JSON CLI 的常用命令、explore visit、cache pro
 
 ## PkuClaw 调用模型
 
-- 对 PkuClaw 来说，`pku3b <read-only command>` 表示“获取当前可用教学网数据”；不要在 PkuClaw 侧臆测数据来自网络还是 cache。
+- 对 PkuClaw 来说，`pku3b <read-only command>` 表示“获取当前可用教学网数据”；不需要关注数据来自网络还是 cache。
 - pku3b 负责底层 cache：metadata/typed cache、cookie、附件/回放 artifact cache，以及下载后返回本地路径的稳定 JSON contract。
 - PkuClaw 只维护业务状态：例如课程通知 diff、摘要和 `data/pkuclaw/course-sync` 下的 latest/state 文件。
 - 如需强制绕过 pku3b fresh typed cache，只有在用户明确要求刷新时使用 `--refresh`。
@@ -25,8 +25,6 @@ description: pku3b raw-only JSON CLI 的常用命令、explore visit、cache pro
 1. repo-local `crates/pku3b/target/debug/pku3b`；
 2. 用户显式指定的 `$PKU3B_BIN`；
 3. PATH 中的 `pku3b`。
-
-repo-local 构建产物优先级最高，因为它最可能是当前 workspace 刚构建和验证过的版本；不要只因 `command -v pku3b` 失败就判断 pku3b 不可用。
 
 推荐执行方式：
 
@@ -93,7 +91,7 @@ PkuClaw 只应解析 `data` 的稳定业务结构；cache provenance 只看 `met
 
 ## 输出约定
 
-新版 pku3b 是 raw-only CLI：
+pku3b 是 raw-only CLI：
 
 - stdout 永远输出 JSON envelope；
 - stderr 只用于日志；
@@ -280,23 +278,3 @@ video: <course_id>:video:<source-url-fingerprint>
 ```
 
 list 返回的 ID 必须能用于对应 get/download 命令。
-
-## 已删除能力
-
-不要再建议或调用以下旧能力：
-
-```text
-syllabus / 选课
-autoelect
-ttshitu
-bark
-thesislib
-人类交互选择
-旧短别名 a / ann / ct / v / s / b / tt / th
-```
-
-## 和 tasks 的关系
-
-- `tasks/sync-notices.md` 默认 live 调 pku3b 只读命令获取当前可用数据，并把结果归一化为 PkuClaw 业务 snapshot/state。
-- `tasks/do-homework.md` 默认处理本地材料；用户要求查询、下载或提交教学网作业时，参考本 skill。
-- `tasks/write-notes.md` 通常不需要 pku3b，除非用户要求从教学网拉取课程资料或回放。

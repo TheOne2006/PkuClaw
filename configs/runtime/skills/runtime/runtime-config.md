@@ -44,7 +44,7 @@ configs/runtime/
 - `enabled`
 - `interval_seconds`
 - `prompt`
-- `skill_names`
+- `suggested_skills`
 - `sink_mode`
 - `prevent_overlap`
 
@@ -91,7 +91,7 @@ outbox 脚本不接受 `channel`、`target_type` 或 `target_id` 参数；Agent 
 - `title`
 - `description`
 - `task`
-- `skill_names`
+- `suggested_skills`
 - `ack`
 
 quick action 是 realtime run，不应创建 loop。
