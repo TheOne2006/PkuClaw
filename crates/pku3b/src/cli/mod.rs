@@ -1204,8 +1204,8 @@ async fn build_client(enable_cache: bool) -> anyhow::Result<api::Client> {
         api::Client::builder().cookie_restore_path(Some(utils::default_user_agent_data_path()));
     if enable_cache {
         builder = builder
-            .cache_ttl(Some(std::time::Duration::from_hours(1)))
-            .download_artifact_ttl(Some(std::time::Duration::from_hours(24)))
+            .cache_ttl(Some(std::time::Duration::from_secs(60 * 60)))
+            .download_artifact_ttl(Some(std::time::Duration::from_secs(24 * 60 * 60)))
     }
     builder.build().await
 }
