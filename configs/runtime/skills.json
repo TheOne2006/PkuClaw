@@ -78,7 +78,7 @@
         "loop"
       ],
       "requires_confirmation": false,
-      "description": "根据课程材料、讲义、PDF 或已有草稿整理/续写学习笔记。",
+      "description": "六阶段课程笔记流水线：根据讲义/PDF 生成 notes_md、汇总 Markdown、LaTeX 工程和 note.pdf；阶段 0-4 默认连续推进，使用 runtime LaTeX 模板。",
       "path": "tasks/write-notes.md"
     },
     {
