@@ -3,7 +3,7 @@ import type { BaseLayoutProps } from 'fumadocs-ui/layouts/shared';
 
 export const siteConfig = {
   name: 'PkuClaw',
-  description: 'PKU study-agent runtime',
+  description: 'PKU STUDY AGENT',
   url: 'https://theone2006.github.io/PkuClaw',
   basePath: '/PkuClaw',
   github: 'https://github.com/TheOne2006/PkuClaw',

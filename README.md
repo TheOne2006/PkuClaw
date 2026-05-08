@@ -2,13 +2,17 @@
 
 # 🐾 PkuClaw
 
-**面向 PKU 工作流的 daemon-centered study-agent runtime**
+**将你的一切教学网事项都交给Agent**
 
-让实时对话、课程通知、DDL 检查、后台循环和渠道投递，都收束到一套可审计、可维护、可扩展的本地运行时。
+
+PkuClaw 是一个面向 PKU 学习场景的 Agent。
+
+它可以持续检查课程通知、作业 DDL、成绩变化，并且定期执行后台任务。 
+
+把需要你关注的事项通过飞书、网页或其他渠道及时推送给你。
 
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](pyproject.toml)
 [![Docs](https://img.shields.io/badge/Docs-Fumadocs-111827)](docs-site/README.md)
-[![Runtime](https://img.shields.io/badge/Runtime-realtime%20%2B%20loop-7c3aed)](ARCHITECTURE.md)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 </div>

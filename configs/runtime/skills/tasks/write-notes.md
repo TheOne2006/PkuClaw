@@ -1,6 +1,6 @@
 ---
 name: pkuclaw-task-write-notes
-description: 阶段化课程笔记生产线：资料获取整理、PDF 读取、Markdown 讲义、Notion 汇总、LaTeX 工程、逐章精修、补图和最终 QA。
+description: 完整课程笔记生产线；命中本 skill 时必须显式 spawn 同等级 subagents/workers，阶段 1 只做 PDF 机械识别与动画页合并，阶段 2 只做保留页码溯源的 source_md 结构化，严禁提前摘要化写笔记。
 ---
 
 # 任务：课程笔记生成
@@ -25,6 +25,8 @@ Main Agent 是 Coordinator / Supervisor，职责是：
 
 并行执行时必须指定互不冲突的写入范围；一个 worker 不得修改其他 worker 负责的文件，除非 Main Agent 明确批准。
 
+完整 write-notes 任务中，sub-agent/worker 不是文案角色，而是必须显式触发的 Codex subagent workflow。Main Agent 在进入阶段 1 前必须 spawn 对应 worker，并在阶段报告中写明 worker 分工、写入边界和是否已等待/验收结果；不得只用单个主 agent 写脚本一次性生成所有正文。若当前宿主确实无法 spawn subagents，必须在开始正文生成前声明串行 fallback、说明影响，并在最终报告中保留该限制。
+
 ## 输入与课程工作区
 
 用户输入可以是课程名、课程目录、教学网页面、课程平台入口、附件线索或已有课件路径。不要假设调用方已经传入整理好的课件目录。
@@ -47,11 +49,14 @@ Main Agent 是 Coordinator / Supervisor，职责是：
 │   ├── README.md
 │   ├── note.tex                   # 模板文件，不是最终主入口
 │   └── chapter.tex                # chapter 模板文件
-├── notes_md/                      # 每个 PDF 对应一份中文 Markdown 讲义
+├── extracted/                     # 阶段 1：逐页机械识别与动画页合并结果
+├── source_md/                     # 阶段 2：保留页码溯源的结构化原始材料
+├── notes_md/                      # 后续正式中文 Markdown 讲义
 ├── chapters/                      # 每个 Lecture 对应一份 LaTeX chapter
 ├── figures/                       # 裁图或重绘图片
 │   └── FIGURES.md                 # 图片来源表
-├── SUMMARY.md                     # Markdown 阶段总表
+├── SOURCE_SUMMARY.md              # 阶段 2 source 总表
+├── SUMMARY.md                     # 正式 Markdown 笔记总表
 ├── README.md                      # LaTeX 工程说明
 ├── note.tex                       # LaTeX 主入口，由模板渲染得到
 ├── note.pdf                       # 编译产物
@@ -109,9 +114,9 @@ configs/runtime/skills/tasks/course-note/
 6. 将讲义 PDF 整理到 `{course_dir}/lectures/`，优先复制或保存工作副本；不要擅自移动、删除、重命名用户原文件。
 7. 对课件去重，识别疑似重复版本、缺失 lecture、扫描版 PDF、无文本层 PDF、损坏文件和异常大小文件。
 8. 统一工作副本命名，命名应稳定、可读，并尽量保留 lecture 顺序，例如 `lecture01_intro.pdf`。
-9. 创建后续阶段需要的基础目录：`notes_md/`、`chapters/`、`figures/`。
+9. 创建后续阶段需要的基础目录：`extracted/`、`source_md/`、`notes_md/`、`chapters/`、`figures/`。
 10. 从 `configs/runtime/skills/tasks/course-note/` 复制模板目录到 `{course_dir}/course-note/`；如果目标模板副本已存在，只能在确认它是本次运行生成或获得 Main Agent 批准后覆盖。
-11. 检查是否已有 `note.tex`、`chapters/*.tex`、`notes_md/*.md`、`README.md`、`SUMMARY.md` 等用户成果；不得覆盖，必须记录并交给 Main Agent 决策。
+11. 检查是否已有 `note.tex`、`chapters/*.tex`、`extracted/*`、`source_md/*.md`、`notes_md/*.md`、`README.md`、`SOURCE_SUMMARY.md`、`SUMMARY.md` 等用户成果；不得覆盖，必须记录并交给 Main Agent 决策。
 12. 生成阶段 0 报告，列出课程工作区、课件清单、模板副本、已有成果、异常和风险。
 
 阶段 0 报告格式：
@@ -152,23 +157,57 @@ configs/runtime/skills/tasks/course-note/
 
 阶段 0 后默认继续到阶段 1；只有发现高风险动作或无法获取课件时才暂停等待用户。
 
-## 阶段 1：PDF 读取与结构化提取
+## 阶段 1：PDF 机械识别与动画页合并
 
-负责 worker：PDF Reader。
+负责 worker：PDF Reader / Page Extractor。
 
 读取 `{course_dir}/lectures/` 下的讲义 PDF；如果阶段 0 只建立了外部映射，也可以读取阶段 0 报告中确认的 PDF 路径。
 
-目标是完整理解每份 PDF 的内容结构，而不是直接写 Markdown 笔记。
+阶段 1 的目标是做忠实的机器识别和页级清洗，不写笔记、不做解释性改写、不提前总结。它要把 PDF 里每一页或每组动画页“到底出现了什么”保存下来，作为后续结构化和写笔记的原始中间表示。
+
+很多课件会因为动画逐步出现文字、公式或图形而把同一张 slide 展开成多页。阶段 1 必须识别这种连续动画页，合并为一个页组；合并时保留原始页码范围，并使用该页组的最大信息集合（通常接近最后一页，但也要保留中途出现后又消失的重要内容）。
+
+输出：
+
+```text
+{course_dir}/extracted/{pdf_stem}_pages.md
+{course_dir}/extracted/{pdf_stem}_pages.json
+{course_dir}/extracted/EXTRACTION_SUMMARY.md
+```
 
 要求：
 
-1. 必须完整阅读每个 PDF，不要只做摘要。
-2. 识别 Lecture 标题、章节结构、定义、定理/结论、例子、证明、算法、表格、图示和公式。
-3. 记录图表的内容意义和所在位置，供阶段 6 补图使用；正文笔记中不要保留页码噪声。
-4. 表格多的 PDF 应尽量提取表格结构。
-5. 扫描版或无文本层 PDF 必须报告 OCR 需求，不能假装已经完整读取。
-6. 如果 PDF 提取乱码、缺页、损坏或顺序异常，必须报告给 Main Agent。
-7. 输出结构化阅读报告，交给 Markdown Writer 和 Main Agent。
+1. 必须逐页读取每个 PDF；不得只读首页、目录、页标题或 PDF 摘要。
+2. 每个原始页面必须进入一个 page unit 或 merged page group；不得无记录地丢页。
+3. 识别并合并连续动画页：同一标题/版式/图形背景高度相似、只是逐步增加文字/项目符号/公式/标注的连续页，应合并为 `pages: x-y`。
+4. 非动画的连续页面不得因为主题相同而合并；主题合并留到阶段 2。
+5. 对每个 page unit / page group 记录：原始页码或页码范围、页标题或可识别标题、本页/页组作用、识别出的正文、项目符号、公式、表格、图示、脚注/引用、明显 OCR/提取异常。
+6. “本页/页组作用”只描述它在讲义中的功能，例如“引入本讲问题”“给出定义”“展示趋势图”“列出政策时间线”“推导公式”；不要写成复习笔记或观点总结。
+7. 表格尽量机械转写为 Markdown 表格；无法可靠转写时保留 `[表：xxx，需回看原图]`。
+8. 图示先记录内容性占位和来源页码/页组，例如 `[图：城乡收入差距趋势，来源 pages 12-13]`；阶段 1 不裁图、不重绘。
+9. 公式尽量保持 LaTeX 或可读文本；不确定的符号必须标注不确定，不能猜。
+10. 扫描版、无文本层、乱码页、空白页、疑似重复页、动画合并页都必须在 `EXTRACTION_SUMMARY.md` 中列出。
+11. 阶段 1 输出可以保留页码，而且必须保留页码/页组，因为这是后续溯源和去重依据；页码噪声只应在最终课堂笔记正文中去掉。
+12. 阶段 1 禁止生成 `notes_md/*.md`、LaTeX、汇总笔记或任何润色后的课堂笔记。
+
+阶段 1 的 page group 建议格式：
+
+```markdown
+## Page Group 4-6：财政分权的基本问题
+
+- 类型：动画合并页 / 普通单页 / 表格页 / 图示页 / 公式页
+- 本页/页组作用：引入中央与地方财政关系的核心问题。
+- 识别内容：
+  - ...
+  - ...
+- 公式：
+  - `$...$`
+- 表格：
+  | ... |
+- 图示：
+  [图：关于 xxx 的示意图，来源 pages 4-6]
+- 提取异常：无 / OCR 不确定 / 图中文字需回看
+```
 
 PDF 读取参考：
 
@@ -184,11 +223,90 @@ doc.close()
 
 表格多的 PDF 可补充使用 `pdfplumber`。扫描版 PDF 需要 OCR；需要安装系统依赖或调用外部服务时，必须交回 Main Agent 确认。
 
-## 阶段 2：逐个 PDF 生成中文 Markdown 讲义
+## 阶段 2：结构化整理 PDF 原始材料
+
+负责 worker：Source Structurer。
+
+根据阶段 1 的 page units / merged page groups，把每个 PDF 的机械识别结果整理成可读的中文结构化材料。阶段 2 仍然不是正式课堂笔记：它只是把阶段 1 的文字按讲义逻辑重新排列、去除动画重复、整理层级，并保留“第几页/页组在讲什么、起什么作用”的溯源信息。
+
+输出：
+
+```text
+{course_dir}/source_md/{pdf_stem}.md
+{course_dir}/SOURCE_SUMMARY.md
+```
+
+要求：
+
+1. 每个 PDF 单独生成一个结构化 source Markdown 文件，文件名与 PDF 对应。
+2. 只使用阶段 1 识别结果和必要的 PDF 回看；不得凭空补入原讲义没有的结论、数据、例子或政策判断。
+3. 可以按讲义逻辑重排和合并相邻 page groups，但必须保留来源页码/页组，例如 `来源：pages 4-6`。
+4. 阶段 2 的语言目标是“结构化表述原材料”，不是“写成最终课堂笔记”；可以比原文更清楚，但不能省略实质内容。
+5. 对每个主题保留页面功能说明，例如“pages 8-10 用一个趋势图说明人口结构变化”，方便后续 Note Writer 决定是否写入正文或补图。
+6. 定义、结论、例子、证明思路、政策背景、制度说明等可以先按原文类型标注为“原文定义/原文结论/原文例子/原文材料”，不要过早改造成彩色框或教材化笔记。
+7. 图和表继续保留内容性占位，并带来源页码/页组；阶段 2 不裁图、不重绘。
+8. 公式使用 LaTeX；无法确认的公式保留原识别结果并标注“需回看”。
+9. 必须覆盖阶段 1 的每个 page unit / page group；如果某页/页组被判断为封面、目录、纯过渡页、重复动画页或无实质内容，也要在覆盖表中说明。
+10. 不生成 `notes_md/*.md`，不生成 Notion 汇总，不生成 LaTeX；正式课堂笔记由后续 Note Writer 基于 `source_md/` 再写。
+
+结构化 source Markdown 建议格式：
+
+```markdown
+# Lecture 标题：结构化原始材料
+
+## 本讲页面地图
+
+| 页码/页组 | 页面作用 | 主要内容 | 后续处理建议 |
+|---|---|---|---|
+| pages 1-1 | 封面 | 课程、讲次、教师 | 最终笔记只保留来源信息 |
+| pages 4-6 | 动画合并页：定义 | xxx | 写入定义框 |
+| pages 12-13 | 图示页 | xxx 趋势图 | 阶段 7 补图 |
+
+## 1. 主题标题（来源：pages x-y）
+
+### 1.1 原文材料整理
+
+- ...
+- ...
+
+> **原文定义（来源：pages x-y）：**
+> ...
+
+> **原文结论/观点（来源：pages x-y）：**
+> ...
+
+> **原文例子（来源：pages x-y）：**
+> ...
+
+[图：关于 xxx 的示意图，来源 pages x-y]
+
+## 覆盖检查
+
+- 已覆盖 page groups：1, 2-3, 4-6, ...
+- 无实质内容/仅动画重复：...
+- 仍需回看：...
+```
+
+`SOURCE_SUMMARY.md` 列出：
+
+- Lecture 标题；
+- 原 PDF 文件名；
+- 阶段 1 extracted 文件名；
+- 阶段 2 source Markdown 文件名；
+- 原 PDF 页数；
+- 合并后的 page group 数；
+- 动画合并页组；
+- 图表/公式/表格数量；
+- 提取异常；
+- 是否有未覆盖 page group。
+
+阶段 2 只生成 `source_md/*.md` 和 `SOURCE_SUMMARY.md`，不要做正式笔记、汇总 Markdown 或 LaTeX。
+
+## 阶段 3：基于 source_md 生成正式中文 Markdown 笔记
 
 负责 worker：Markdown Writer。
 
-根据阶段 1 的结构化阅读结果和必要的 PDF 回看，为每个 PDF 单独生成一份中文 Markdown 讲义。
+根据阶段 2 的 `source_md/*.md` 和必要的 PDF 回看，为每个 PDF 单独生成正式中文课堂笔记。阶段 3 才开始“写笔记”：此时应去掉页码噪声，按讲义逻辑重新组织语言，让内容适合学生复习和后续 LaTeX 化。
 
 输出：
 
@@ -199,17 +317,20 @@ doc.close()
 
 要求：
 
-1. 每个 PDF 单独生成一个中文 Markdown 讲义文件。
-2. 按讲义逻辑重新组织成中文课堂笔记，而不是逐页机械翻译。
-3. 不保留 `Page 1`、`第 x 页`、`原讲义第 x 页` 之类页码标记。
-4. 可以合并连续页面中的同一主题。
-5. 中文为主，英文专业名词第一次出现时保留英文，例如：多智能体系统（Multi-Agent System）。
-6. 不凭空添加原讲义没有的定理、结论或例子。
-7. 如果需要补充理解，明确标注“补充理解”。
-8. 定义、定理、例子、证明、备注使用统一格式。
-9. 数学公式使用 LaTeX：行内 `$...$`，独立公式用 `$$...$$`。
-10. 图无法直接转换时，保留内容性占位：`[图：关于 xxx 的示意图]`，不要写页码。
-11. 表格尽量转为 Markdown 表格。
+1. 每个 PDF 单独生成一个中文 Markdown 讲义文件，文件名与 PDF/source 对应。
+2. 必须以 `source_md/` 的页面地图和结构化原始材料为依据；不能只看标题、目录或几条摘要。
+3. 必要时回看原 PDF，尤其是阶段 2 标注“需回看”的图、表、公式、政策表述和数据页。
+4. 按讲义逻辑重新组织成中文课堂笔记，而不是逐页机械翻译。
+5. 正式笔记正文不保留 `Page 1`、`第 x 页`、`原讲义第 x 页` 之类页码标记；页码只保留在 source/extracted 中。
+6. 可以合并连续页面中的同一主题，但不得删除 source 中的实质内容。
+7. 中文为主，英文专业名词第一次出现时保留英文。
+8. 不凭空添加原讲义没有的定理、结论、数据、政策判断或例子；必要补充必须明确标注“补充理解”。
+9. 定义、结论/观点、例子、备注、证明思路、政策背景、制度说明使用统一格式。
+10. 数学公式使用 LaTeX：行内 `$...$`，独立公式用 `$$...$$`。
+11. 图无法直接转换时，保留内容性占位：`[图：关于 xxx 的示意图]`，不要写页码。
+12. 表格尽量转为 Markdown 表格。
+13. 必须覆盖 `source_md/` 中标记为“后续写入笔记”的实质内容；跳过的封面、目录、纯过渡页或重复动画页应在 `SUMMARY.md` 中说明。
+14. 不得把完整讲义压缩成提纲。对 15 页以上且有文本层的 lecture，如果正式 Markdown 少于约 120 行，必须主动回看 `source_md/` 和 PDF 判断是否漏写；只有讲义本身高度图像化/文字极少时才可例外，并须在 `SUMMARY.md` 标明。
 
 Markdown 结构：
 
@@ -225,7 +346,7 @@ Markdown 结构：
 > **定义：**
 > ...
 
-> **定理：**
+> **结论/观点：**
 > ...
 
 > **例子：**
@@ -242,14 +363,17 @@ Markdown 结构：
 
 - Lecture 标题；
 - 原 PDF 文件名；
+- source Markdown 文件名；
 - 输出 Markdown 文件名；
 - 简短主题说明；
+- 源 PDF 页数、source page group 数、正式 Markdown 行数/字符数；
 - 是否含图占位；
-- 是否存在 PDF 提取异常。
+- 是否存在 PDF/source 提取异常；
+- 是否有 source 实质内容未写入正式笔记。
 
-阶段 2 只生成 `notes_md/*.md` 和 `SUMMARY.md`，不要做 LaTeX。
+阶段 3 只生成 `notes_md/*.md` 和 `SUMMARY.md`，不要做 LaTeX。
 
-## 阶段 3：生成 Notion 用汇总 Markdown
+## 阶段 4：生成汇总 Markdown
 
 负责 worker：Markdown Merger。
 
@@ -276,8 +400,9 @@ Markdown 结构：
 4. 保留公式、表格、定义、定理、例子、备注格式。
 5. 不保留原 PDF 页码。
 6. 检查是否所有 `notes_md/*.md` 都已合并。
+7. 合并后检查总行数/字符数应接近各 `notes_md/*.md` 之和；不得在阶段 4 做摘要化瘦身。
 
-阶段 3 报告：
+阶段 4 报告：
 
 - 合并了多少个文件；
 - 输出文件路径；
@@ -285,7 +410,7 @@ Markdown 结构：
 - 是否发现顺序异常；
 - 是否有缺失 Lecture。
 
-## 阶段 4：搭建 LaTeX 讲义工程
+## 阶段 5：搭建 LaTeX 讲义工程
 
 负责 worker：LaTeX Builder。
 
@@ -359,18 +484,18 @@ LaTeX 主文件建议包含或继承这些能力：
 }
 ```
 
-阶段 4 必须尝试编译 `note.tex` 并记录报告，但不需要等待用户验收：
+阶段 5 必须尝试编译 `note.tex` 并记录报告，但不需要等待用户验收：
 
 - 生成了哪些文件；
 - 是否成功编译；
 - PDF 页数；
 - LaTeX log 中是否有 `Overfull`、`Underfull`、`Undefined`、`Missing`、`LaTeX Warning`。
 
-## 阶段 5：逐章精修 LaTeX
+## 阶段 6：逐章精修 LaTeX
 
 负责 worker：Chapter Refiner。
 
-阶段 5 不补图，不裁图，不重绘图。只精修 LaTeX 结构、文字、公式、表格。
+阶段 6 不补图，不裁图，不重绘图。只精修 LaTeX 结构、文字、公式、表格。
 
 每次精修 2-3 个 chapter，然后编译检查一次。全部完成后，再完整编译 `note.tex`。
 
@@ -387,18 +512,18 @@ LaTeX 主文件建议包含或继承这些能力：
 9. 内容是否像课堂讲义，而不是机械翻译。
 10. 不删除实质内容。
 
-阶段 5 报告是内部检查点，不需要等待用户验收：
+阶段 6 报告是内部检查点，不需要等待用户验收：
 
 - 改了哪些 chapter；
 - 修复了哪些主要问题；
 - 编译是否通过；
 - 还有哪些遗留问题。
 
-## 阶段 6：一张一张看原 PDF，补齐有用图片
+## 阶段 7：一张一张看原 PDF，补齐有用图片
 
 负责 worker：Figure Curator。
 
-阶段 6 专门处理图片。它必须在阶段 5 完成之后执行。
+阶段 7 专门处理图片。它必须在阶段 6 完成之后执行。
 
 输出：
 
@@ -446,9 +571,9 @@ LaTeX 主文件建议包含或继承这些能力：
 | lecture03_game_theory_fig001_payoff_matrix.png | 收益矩阵示意 | lecture03.pdf | 12 | 截图自 |
 ```
 
-阶段 6 完成后重新编译 `note.tex`，并抽样渲染检查 PDF 页面，确认图片不糊、不超宽、不遮挡文字。
+阶段 7 完成后重新编译 `note.tex`，并抽样渲染检查 PDF 页面，确认图片不糊、不超宽、不遮挡文字。
 
-阶段 6 报告：
+阶段 7 报告：
 
 - 共补了多少张图；
 - 其中多少张截图自原 PDF；
@@ -456,11 +581,11 @@ LaTeX 主文件建议包含或继承这些能力：
 - `FIGURES.md` 路径；
 - `note.pdf` 是否重新编译成功。
 
-## 阶段 7：最终 QA
+## 阶段 8：最终 QA
 
 负责 worker：QA Runner。
 
-阶段 7 不新增内容，除非发现明显错误需要修复。
+阶段 8 不新增内容，除非发现明显错误需要修复。
 
 检查项目：
 
@@ -479,7 +604,7 @@ LaTeX 主文件建议包含或继承这些能力：
 8. 图片是否命名统一。
 9. `FIGURES.md` 是否覆盖所有图片。
 10. `SUMMARY.md` 是否和最终章节一致。
-11. Notion 汇总 Markdown 是否存在且覆盖全部 Lecture。
+11. 汇总 Markdown 是否存在且覆盖全部 Lecture。
 12. `course-note/` 模板副本是否仍是模板副本，最终主入口是否为根目录 `note.tex`。
 
 最终交付报告：
@@ -507,13 +632,14 @@ LaTeX 主文件建议包含或继承这些能力：
 
 ## 阶段 worker 写入边界
 
-默认目标是完整跑通阶段 0-7。阶段是内部生产检查点，不要求用户逐阶段验收；只有遇到高风险动作、无法获取资料、登录/凭据阻塞、覆盖已有成果、安装依赖或删除/移动文件时才暂停确认。
+默认目标是完整跑通阶段 0-8。阶段是内部生产检查点，不要求用户逐阶段验收；只有遇到高风险动作、无法获取资料、登录/凭据阻塞、覆盖已有成果、安装依赖或删除/移动文件时才暂停确认。
 
 并行时必须指定互不冲突的写入范围：
 
 - Material Organizer 负责 `{course_dir}`、`lectures/`、`course-note/` 模板副本和阶段 0 报告；不得生成正文。
-- PDF Reader 只读 PDF 并输出结构化阅读报告；不得写正式笔记正文。
-- Markdown Writer 只写 `notes_md/*.md` 和 `SUMMARY.md`。
+- PDF Reader / Page Extractor 只读 PDF，写 `extracted/` 下逐页识别与动画页合并结果；不得写正式笔记正文。
+- Source Structurer 只写 `source_md/*.md` 和 `SOURCE_SUMMARY.md`，保留页码/页组溯源；不得写正式笔记正文。
+- Markdown Writer 只基于 `source_md/` 写阶段 3 正式 `notes_md/*.md` 和 `SUMMARY.md`。
 - Markdown Merger 只写 `{course_name}_汇总笔记.md`。
 - LaTeX Builder 只写根目录 `note.tex`、`README.md`、初版 `chapters/*.tex` 和初版 `note.pdf`。
 - Chapter Refiner 按 Main Agent 分配的 chapter 分片修改；不得跨片覆盖。
@@ -524,30 +650,34 @@ LaTeX 主文件建议包含或继承这些能力：
 
 负责阶段 0，获取课程资料、整理讲义 PDF、建立课程工作区、复制 `course-note` 模板副本并报告异常。在课程和 `{course_dir}` 已确认或已创建后，下载普通讲义附件属于本阶段职责；课程回放、超大附件、凭据/验证码和远端写操作必须交回 Main Agent。
 
-### PDF Reader
+### PDF Reader / Page Extractor
 
-负责阶段 1，完整读取 PDF、识别标题、表格、公式、图示位置和异常页。扫描版或无法提取文本的 PDF 必须报告。
+负责阶段 1，逐页机械识别 PDF、合并动画展开页、记录页码/页组、正文、表格、公式、图示位置和异常页。扫描版或无法提取文本的 PDF 必须报告。
+
+### Source Structurer
+
+负责阶段 2，把阶段 1 的 page units / merged page groups 整理成 `source_md/` 结构化原始材料。它可以调整层级和合并相邻主题，但必须保留页码/页组溯源，不写正式课堂笔记。
 
 ### Markdown Writer
 
-负责阶段 2 的中文 Markdown 讲义。每个 PDF 可以一个 writer，但必须由 Main Agent 汇总检查标题、顺序和风格。
+负责阶段 3 的正式中文 Markdown 讲义。每个 PDF 可以一个 writer，但必须以 `source_md/` 为依据，并由 Main Agent 汇总检查标题、顺序、覆盖率和风格。
 
 ### Markdown Merger
 
-负责阶段 3，把 `notes_md/` 合并成 Notion 用汇总 Markdown，不改写正文内容。
+负责阶段 4，把 `notes_md/` 合并成汇总 Markdown，不改写正文内容。
 
 ### LaTeX Builder
 
-负责阶段 4，把 Markdown 转为 `chapters/*.tex`，从课程目录的 `course-note/` 模板副本渲染根目录 `note.tex`，并搭建基础宏包和 README。
+负责阶段 5，把 Markdown 转为 `chapters/*.tex`，从课程目录的 `course-note/` 模板副本渲染根目录 `note.tex`，并搭建基础宏包和 README。
 
 ### Chapter Refiner
 
-负责阶段 5，逐章精修。每次只处理 2-3 个 chapter，处理后编译。
+负责阶段 6，逐章精修。每次只处理 2-3 个 chapter，处理后编译。
 
 ### Figure Curator
 
-负责阶段 6，看原 PDF、裁图、重绘、写 `FIGURES.md`、插入 `\notefigure`。
+负责阶段 7，看原 PDF、裁图、重绘、写 `FIGURES.md`、插入 `\notefigure`。
 
 ### QA Runner
 
-负责阶段 7，做最终编译、引用检查、占位符检查、页码残留检查和交付报告。
+负责阶段 8，做最终编译、引用检查、占位符检查、页码残留检查和交付报告。
