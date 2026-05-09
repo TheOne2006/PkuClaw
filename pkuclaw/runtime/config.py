@@ -35,8 +35,9 @@ SUPPORTED_NOTIFY_POLICIES = (
 _NOTIFY_POLICY_DESCRIPTIONS = {
     "important_only": (
         "只在重要变化或需要用户处理时通知；重要变化包括新增/变更 DDL、"
-        "24 小时内到期事项、逾期/失败风险、重要公告、登录失效、"
-        "工具缺失或连续抓取失败。没有重要变化时保持静默，只更新本地快照/摘要。"
+        "未提交作业进入 72 小时/24 小时提醒窗口、逾期/失败风险、成绩或反馈变化、"
+        "重要公告、登录失效、工具缺失或连续抓取失败。"
+        "课件/课程内容目录变化默认不作为通知项。没有重要变化时保持静默，只更新本地快照/摘要。"
     ),
     "always": (
         "每次 loop 完成都发送简洁通知。即使没有变化，也发送低噪声状态摘要；"
@@ -53,7 +54,7 @@ _NOTIFY_POLICY_DESCRIPTIONS = {
     ),
     "digest": (
         "汇总通知策略。普通变化先写入本地快照/摘要，不逐条即时通知；"
-        "在本次任务明确要求发送汇总，或发现逾期/24 小时内 DDL、登录失效等紧急事项时，"
+        "在本次任务明确要求发送汇总，或发现逾期/72 小时/24 小时内 DDL、成绩变化、登录失效等紧急事项时，"
         "发送一条合并后的简洁摘要。"
     ),
 }
@@ -482,7 +483,7 @@ def _default_loops() -> tuple[RuntimeLoopConfig, ...]:
             id="sync_notices",
             enabled=True,
             interval_seconds=900,
-            prompt="检查课程状态、教学网通知和本地数据。如果没有重要变化，保持静默；如果发现重要变化，使用 Channel Outbox Skill 发送简洁 text/image/file 通知用户。",
+            prompt="检查课程作业/DDL、教学网公告和成绩变化；不要监控课件或课程内容目录变化。如果没有重要变化，保持静默；如果发现成绩变化、未提交 DDL 进入 72 小时/24 小时窗口、逾期或重要公告，使用 Channel Outbox Skill 发送简洁 text/image/file 通知用户。",
             suggested_skills=("tasks/sync-notices.md",),
             sink_mode="silent",
             prevent_overlap=True,
