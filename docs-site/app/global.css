@@ -243,12 +243,6 @@ samp {
   display: inline-flex;
 }
 
-.pkuclaw-reveal {
-  animation: pkuclaw-hero-reveal 580ms cubic-bezier(0, 0, 0.2, 1) both;
-  animation-delay: var(--pkuclaw-reveal-delay, 0ms);
-  will-change: opacity, transform;
-}
-
 .pkuclaw-button {
   position: relative;
   display: inline-flex;
@@ -843,17 +837,6 @@ samp {
   }
 }
 
-@keyframes pkuclaw-hero-reveal {
-  0% {
-    opacity: 0;
-    transform: translate3d(var(--pkuclaw-reveal-x, 0), var(--pkuclaw-reveal-y, 18px), 0) scale(var(--pkuclaw-reveal-scale, 0.96));
-  }
-  100% {
-    opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
-  }
-}
-
 @keyframes pkuclaw-badge-glow {
   0%, 100% {
     opacity: 0;
@@ -949,7 +932,6 @@ samp {
 @media (prefers-reduced-motion: reduce) {
   .pkuclaw-home__brand-mark,
   .pkuclaw-home__brand-mark::after,
-  .pkuclaw-reveal,
   .pkuclaw-logo-card__orbit,
   .pkuclaw-logo-card__inner,
   .pkuclaw-chat-card__shine,
@@ -958,11 +940,6 @@ samp {
   .pkuclaw-starfield__lines path,
   .pkuclaw-starfield__lines circle {
     animation: none !important;
-  }
-
-  .pkuclaw-reveal {
-    opacity: 1 !important;
-    transform: none !important;
   }
 
   .pkuclaw-starfield__lines path {
