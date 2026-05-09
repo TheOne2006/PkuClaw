@@ -2,20 +2,8 @@
   "title": "PkuClaw",
   "pages": [
     "index",
-    "---开始使用---",
-    "quickstart",
-    "installation",
-    "configuration",
-    "---运行时---",
-    "runtime",
-    "quick-actions",
-    "skills",
-    "---开发者---",
-    "architecture",
-    "development",
-    "contributing",
-    "---参考---",
-    "./reference/config-files",
-    "faq"
+    "---文档路径---",
+    "user-guide",
+    "developer-guide"
   ]
 }

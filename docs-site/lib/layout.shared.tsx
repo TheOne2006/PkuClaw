@@ -1,4 +1,3 @@
-import Link from 'next/link';
 import type { BaseLayoutProps } from 'fumadocs-ui/layouts/shared';
 
 export const siteConfig = {
@@ -16,10 +15,10 @@ export function withBasePath(path: string): string {
 
 function NavTitle() {
   return (
-    <Link href="/" className="pkuclaw-nav-title" aria-label="PkuClaw home">
+    <span className="pkuclaw-nav-title" aria-label="PkuClaw home">
       <img src={withBasePath('/icon-192.png')} alt="" width={28} height={28} />
       <span>PkuClaw</span>
-    </Link>
+    </span>
   );
 }
 

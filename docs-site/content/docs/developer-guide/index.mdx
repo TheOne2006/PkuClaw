@@ -1,0 +1,24 @@
+---
+title: 开发者指南
+description: 面向贡献者和维护者的架构、runtime、skill 与代码修改指南。
+---
+
+开发者指南只关注 PkuClaw 的内部结构、runtime 边界、prompt/skill 维护和贡献流程。它与使用指南平行存在，不作为普通使用流程的下一步。
+
+<Cards>
+  <Card title="架构说明" href="/docs/developer-guide/architecture" description="理解 CoreRuntime、AgentWrapper、LoopManager 和 channel outbox。" />
+  <Card title="Runtime 设计" href="/docs/developer-guide/runtime" description="理解 realtime、loop、runtime files 和 outbox 的边界。" />
+  <Card title="Skill Catalog" href="/docs/developer-guide/skills" description="维护 runtime skill 的目录、依赖和加载规则。" />
+  <Card title="开发工作流" href="/docs/developer-guide/development" description="修改代码、prompt 或 runtime 文件前的约束与验证。" />
+</Cards>
+
+## 推荐顺序
+
+1. [架构说明](/docs/developer-guide/architecture)：先建立整体模块地图。
+2. [Runtime 设计](/docs/developer-guide/runtime)：确认 realtime、loop 和 outbox 的边界。
+3. [Skill Catalog](/docs/developer-guide/skills)：理解 prompt 只注入目录元数据的设计。
+4. [开发工作流](/docs/developer-guide/development)：按约束修改代码和文档。
+5. [配置文件参考](/docs/developer-guide/config-files)：查启动期配置和 runtime 文件格式。
+6. [参与贡献](/docs/developer-guide/contributing)：提交 PR 前检查贡献规范。
+
+如果你只是想安装、配置并使用 PkuClaw，请转到 [使用指南](/docs/user-guide)。
