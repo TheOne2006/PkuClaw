@@ -27,7 +27,6 @@ from pkuclaw.runtime.config import (
 from pkuclaw.runtime.prompts import read_prompt_templates, render_prompt_template
 from pkuclaw.agents.providers.codex import CodexAgent
 from pkuclaw.runtime.skills import (
-    OUTBOX_SKILL_NAME,
     load_skill_registry,
     render_skill_catalog,
     render_suggested_skills,
@@ -182,11 +181,8 @@ class AgentWrapper:
             agent_settings=agent_settings,
             paths=paths,
             repo_root=self.repo_root,
-            recent_runs_text="",
             skill_catalog_text=skill_catalog_text,
             rendered_skills=suggested_skills_text,
-            prompt_fragments="",
-            outbox_script_text=_outbox_script_text(),
             warnings=warnings,
         )
 
@@ -203,19 +199,11 @@ class AgentWrapper:
         """Build the realtime task prompt from runtime templates."""
 
         templates = read_prompt_templates(self.runtime_config.config_dir)
-        suggested = (
-            render_prompt_template(
-                templates.realtime.suggested_skills_template,
-                {"suggested_skills": context.rendered_skills},
-            )
-            if context.rendered_skills.strip() != "- none"
-            else ""
-        )
         return render_prompt_template(
             templates.realtime.template,
             {
                 "skill_catalog": context.skill_catalog_text,
-                "suggested_skills_section": suggested,
+                "suggested_skills": context.rendered_skills,
                 "user_request": context.request.text,
             },
         )
@@ -235,7 +223,6 @@ class AgentWrapper:
                 "notify_policy": notify_policy,
                 "notify_policy_description": describe_notify_policy(notify_policy),
                 "notification_target": _notification_target_text(channel_context.get("target")),
-                "channel_outbox_skill": context.outbox_script_text,
                 "skill_catalog": context.skill_catalog_text,
                 "suggested_skills": context.rendered_skills,
                 "task": context.request.text,
@@ -287,17 +274,6 @@ def _notification_target_text(value: object) -> str:
         target_id = value.get("target_id") or "unknown"
         return f"`{channel}` / `{target_type}` / `{target_id}`"
     return "not configured"
-
-
-def _outbox_script_text() -> str:
-    """Render concise outbox script instructions."""
-
-    return (
-        "Use the channel outbox skill only when you need to send text/image/file "
-        "outside the normal realtime streaming card. "
-        f"Read `configs/runtime/skills/{OUTBOX_SKILL_NAME}` and call the documented "
-        "queue-based Python script."
-    )
 
 
 def _request_metadata(request: AgentRunRequest) -> dict[str, object]:

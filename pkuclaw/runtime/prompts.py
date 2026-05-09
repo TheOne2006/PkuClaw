@@ -16,7 +16,6 @@ class RuntimePromptTemplate:
     """One prompt template loaded from runtime config."""
 
     template: str
-    suggested_skills_template: str = ""
 
 
 @dataclass(frozen=True)
@@ -80,19 +79,4 @@ def _parse_template_section(raw: Mapping[str, Any], key: str) -> RuntimePromptTe
     template = value.get("template")
     if not isinstance(template, str) or not template.strip():
         raise RuntimeError(f"runtime prompts section {key}.template is required")
-    suggested_skills_template = value.get("suggested_skills_template", "")
-    if key == "realtime" and (
-        not isinstance(suggested_skills_template, str)
-        or not suggested_skills_template.strip()
-    ):
-        raise RuntimeError(
-            "runtime prompts section realtime.suggested_skills_template is required"
-        )
-    if not isinstance(suggested_skills_template, str):
-        raise RuntimeError(
-            f"runtime prompts section {key}.suggested_skills_template must be a string"
-        )
-    return RuntimePromptTemplate(
-        template=template,
-        suggested_skills_template=suggested_skills_template,
-    )
+    return RuntimePromptTemplate(template=template)

@@ -7,8 +7,8 @@ export function PkuClawLogoCard() {
       <div className="pkuclaw-logo-card__inner">
         <img src={withBasePath('/icon-512.png')} alt="PkuClaw icon" width={150} height={150} />
         <div>
-          <p>Runtime surface</p>
-          <strong>Realtime · Loop · Outbox</strong>
+          <p>Study Agent</p>
+          <strong>Check · Track · Notify</strong>
         </div>
       </div>
     </div>

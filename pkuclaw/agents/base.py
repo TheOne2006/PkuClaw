@@ -37,11 +37,8 @@ class AgentRunContext:
     agent_settings: AgentSettings
     paths: AgentRunPaths
     repo_root: Path
-    recent_runs_text: str
     skill_catalog_text: str
     rendered_skills: str
-    prompt_fragments: str
-    outbox_script_text: str
     warnings: tuple[str, ...]
 
 

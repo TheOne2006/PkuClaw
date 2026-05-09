@@ -38,6 +38,7 @@ export function PkuClawStarfield() {
       maxLife: number;
     }> = [];
     let raf = 0;
+    let lastFrameTime = 0;
 
     const palette = {
       star: '255, 245, 240',
@@ -68,9 +69,9 @@ export function PkuClawStarfield() {
     }
 
     function resize() {
-      dpr = Math.min(window.devicePixelRatio || 1, 2);
       width = window.innerWidth;
       height = window.innerHeight;
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
       canvas.width = Math.floor(width * dpr);
       canvas.height = Math.floor(height * dpr);
       canvas.style.width = `${width}px`;
@@ -107,10 +108,44 @@ export function PkuClawStarfield() {
       context.stroke();
     }
 
-    function spawnMeteor() {
+    function drawParticleLinks(maxDistance: number, color: string, strength: number) {
+      const cellSize = maxDistance;
+      const grid = new Map<string, number[]>();
+
+      for (let index = 0; index < particles.length; index += 1) {
+        const particle = particles[index];
+        const key = `${Math.floor(particle.x / cellSize)}:${Math.floor(particle.y / cellSize)}`;
+        const bucket = grid.get(key);
+        if (bucket) {
+          bucket.push(index);
+        } else {
+          grid.set(key, [index]);
+        }
+      }
+
+      for (let index = 0; index < particles.length; index += 1) {
+        const particle = particles[index];
+        const cellX = Math.floor(particle.x / cellSize);
+        const cellY = Math.floor(particle.y / cellSize);
+
+        for (let offsetX = -1; offsetX <= 1; offsetX += 1) {
+          for (let offsetY = -1; offsetY <= 1; offsetY += 1) {
+            const bucket = grid.get(`${cellX + offsetX}:${cellY + offsetY}`);
+            if (!bucket) continue;
+
+            for (const otherIndex of bucket) {
+              if (otherIndex <= index) continue;
+              drawLine(particle, particles[otherIndex], maxDistance, color, strength);
+            }
+          }
+        }
+      }
+    }
+
+    function spawnMeteor(frameScale: number) {
       if (reduceMotion) return;
       if (meteors.length > 2) return;
-      if (Math.random() > 0.012) return;
+      if (Math.random() > Math.min(0.04, 0.012 * frameScale)) return;
       meteors.push({
         x: rand(width * 0.08, width * 0.92),
         y: rand(-40, height * 0.42),
@@ -122,7 +157,7 @@ export function PkuClawStarfield() {
       });
     }
 
-    function drawMeteor(meteor: (typeof meteors)[number]) {
+    function drawMeteor(meteor: (typeof meteors)[number], frameScale: number) {
       const alpha = Math.sin((meteor.life / meteor.maxLife) * Math.PI) * 0.75;
       const tailX = meteor.x - meteor.vx * (meteor.length / 10);
       const tailY = meteor.y - meteor.vy * (meteor.length / 10);
@@ -136,19 +171,23 @@ export function PkuClawStarfield() {
       context.moveTo(meteor.x, meteor.y);
       context.lineTo(tailX, tailY);
       context.stroke();
-      meteor.x += meteor.vx;
-      meteor.y += meteor.vy;
-      meteor.life += 1;
+      meteor.x += meteor.vx * frameScale;
+      meteor.y += meteor.vy * frameScale;
+      meteor.life += frameScale;
     }
 
     function draw(time: number) {
+      const elapsed = lastFrameTime === 0 ? 1000 / 60 : time - lastFrameTime;
+      lastFrameTime = time;
+      const frameScale = reduceMotion ? 0 : Math.min(2.4, elapsed / (1000 / 60));
+
       context.clearRect(0, 0, width, height);
-      spawnMeteor();
+      spawnMeteor(frameScale);
 
       for (const particle of particles) {
         if (!reduceMotion) {
-          particle.x += particle.vx;
-          particle.y += particle.vy;
+          particle.x += particle.vx * frameScale;
+          particle.y += particle.vy * frameScale;
           if (particle.x < -20) particle.x = width + 20;
           if (particle.x > width + 20) particle.x = -20;
           if (particle.y < -20) particle.y = height + 20;
@@ -178,14 +217,10 @@ export function PkuClawStarfield() {
         context.fill();
       }
 
-      for (let i = 0; i < particles.length; i += 1) {
-        for (let j = i + 1; j < particles.length; j += 1) {
-          drawLine(particles[i], particles[j], 118, palette.line, 0.12);
-        }
-      }
+      drawParticleLinks(118, palette.line, 0.12);
 
       meteors = meteors.filter((meteor) => meteor.life < meteor.maxLife && meteor.x > -260 && meteor.y < height + 260);
-      for (const meteor of meteors) drawMeteor(meteor);
+      for (const meteor of meteors) drawMeteor(meteor, frameScale);
 
       if (pointer.active) {
         const cursor = { x: pointer.x, y: pointer.y };
@@ -220,7 +255,7 @@ export function PkuClawStarfield() {
     window.addEventListener('resize', resize, { passive: true });
     window.addEventListener('pointermove', onPointerMove, { passive: true });
     window.addEventListener('pointerleave', onPointerLeave, { passive: true });
-    draw(0);
+    draw(performance.now());
 
     return () => {
       window.cancelAnimationFrame(raf);

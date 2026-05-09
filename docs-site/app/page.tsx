@@ -3,7 +3,7 @@ import { PkuClawHero } from '@/components/pkuclaw-hero';
 
 export const metadata: Metadata = {
   title: 'PkuClaw',
-  description: 'PKU study-agent runtime，把实时消息、后台检查、运行时配置和渠道通知收束成轻量 workflow。',
+  description: 'PKU STUDY AGENT：PKU 学生的一站式教学网 Agent 解决方案。',
 };
 
 export default function HomePage() {

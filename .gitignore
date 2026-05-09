@@ -30,6 +30,11 @@ Thumbs.db
 
 # Local Codex/dev worktrees
 .dev/
+
+# Local agent instructions
+AGENTS.md
+agent.md
+
 # Node / docs site
 docs-site/node_modules/
 docs-site/dist/

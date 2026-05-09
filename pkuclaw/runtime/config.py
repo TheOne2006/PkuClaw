@@ -73,7 +73,7 @@ class RuntimeLoopConfig:
     enabled: bool = True
     interval_seconds: int | None = None
     prompt: str = ""
-    skill_names: tuple[str, ...] = ()
+    suggested_skills: tuple[str, ...] = ()
     sink_mode: str = "silent"
     default_channel: str | None = None
     default_target_type: str | None = None
@@ -318,7 +318,7 @@ _LOOP_UPDATE_KEYS = {
     "enabled",
     "interval_seconds",
     "prompt",
-    "skill_names",
+    "suggested_skills",
     "sink_mode",
     "default_channel",
     "default_target_type",
@@ -465,7 +465,7 @@ def _parse_loop(
         enabled=_optional_bool(item, "enabled", default=True),
         interval_seconds=interval_seconds,
         prompt=_optional_str(item, "prompt") or "",
-        skill_names=_optional_str_tuple(item, "skill_names"),
+        suggested_skills=_optional_str_tuple(item, "suggested_skills"),
         sink_mode=_optional_str(item, "sink_mode") or "silent",
         default_channel=default_target["default_channel"],
         default_target_type=default_target["default_target_type"],
@@ -483,7 +483,7 @@ def _default_loops() -> tuple[RuntimeLoopConfig, ...]:
             enabled=True,
             interval_seconds=900,
             prompt="检查课程状态、教学网通知和本地数据。如果没有重要变化，保持静默；如果发现重要变化，使用 Channel Outbox Skill 发送简洁 text/image/file 通知用户。",
-            skill_names=("tasks/sync-notices.md",),
+            suggested_skills=("tasks/sync-notices.md",),
             sink_mode="silent",
             prevent_overlap=True,
         ),
@@ -547,7 +547,7 @@ def _loop_config_to_raw(loop: RuntimeLoopConfig) -> dict[str, Any]:
         "enabled": loop.enabled,
         "interval_seconds": loop.interval_seconds,
         "prompt": loop.prompt,
-        "skill_names": list(loop.skill_names),
+        "suggested_skills": list(loop.suggested_skills),
         "sink_mode": loop.sink_mode,
         "default_channel": loop.default_channel,
         "default_target_type": loop.default_target_type,

@@ -16,7 +16,7 @@
       "enabled": true,
       "interval_seconds": 900,
       "prompt": "检查课程状态、教学网通知和本地数据。如果没有重要变化，保持静默；如果发现重要变化，使用 Channel Outbox Skill 发送简洁 text/image/file 通知用户。",
-      "skill_names": [
+      "suggested_skills": [
         "tasks/sync-notices.md"
       ],
       "sink_mode": "silent",

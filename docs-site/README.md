@@ -1,6 +1,8 @@
 # PkuClaw 文档站
 
-本目录是 PkuClaw 的 Next.js + Fumadocs 文档站。站点内容以中文为默认语言，面向安装、配置、runtime 概念和开发者入门。
+本目录是 PkuClaw 的 Next.js + Fumadocs 文档站。站点内容以中文为默认语言，面向使用指南与开发者指南两条平行文档路径。
+
+在线地址：https://theone2006.github.io/PkuClaw/
 
 ## 本地预览
 
@@ -36,7 +38,8 @@ GitHub Pages 部署由 `.github/workflows/deploy-docs.yml` 触发：
 
 ## 维护约定
 
-- 用户向导、安装、配置、概念页放在 `content/docs/`。
-- 仓库内部审计和维护报告放在根目录 `docs/`，必要时从站点链接过去。
+- 使用者文档放在 `content/docs/user-guide/`，开发者文档放在 `content/docs/developer-guide/`，两条路径保持平行，不混排。
+- 根目录 `README.md` 只做快速介绍、快速安装和文档入口，不承载完整开发/审计文档。
+- 不再默认使用根目录 `docs/` 作为文档入口；如果未来确实需要临时审计报告，先创建对应文件或迁移进文档站后再链接。
 - 示例中不要写真实 app secret、token、cookie、open_id/chat_id。
 - 修改文档站后优先使用 `npm ci` 保持 lockfile 可复现。

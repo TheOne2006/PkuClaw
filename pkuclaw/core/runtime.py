@@ -284,7 +284,7 @@ class CoreRuntime:
         runtime = self.runtime_config.read_snapshot()
         loop = _select_loop(runtime.loops, loop_id=loop_id)
         text = loop.prompt or "Run this configured periodic loop. Stay silent unless important."
-        suggested_skills = _loop_suggested_skills(loop.skill_names)
+        suggested_skills = _loop_suggested_skills(loop.suggested_skills)
         scheduled_at = scheduled_at or utc_now()
         target = _loop_notification_target(loop, runtime.notifications)
         channel_context: dict[str, Any] = {
@@ -356,7 +356,7 @@ def _event_realtime_plan(event: RuntimeEventSpec) -> TaskPlan:
     """Build the fixed realtime plan for a configured quick action."""
 
     return TaskPlan(
-        suggested_skills=event.skill_names,
+        suggested_skills=event.suggested_skills,
         ack=event.ack,
     )
 
@@ -379,12 +379,12 @@ def _select_loop(
     raise RuntimeError("no enabled runtime loops")
 
 
-def _loop_suggested_skills(skill_names: tuple[str, ...]) -> tuple[str, ...]:
+def _loop_suggested_skills(suggested_skills: tuple[str, ...]) -> tuple[str, ...]:
     """Append the channel outbox skill to every loop run."""
 
-    if OUTBOX_SKILL_NAME in skill_names:
-        return skill_names
-    return (*skill_names, OUTBOX_SKILL_NAME)
+    if OUTBOX_SKILL_NAME in suggested_skills:
+        return suggested_skills
+    return (*suggested_skills, OUTBOX_SKILL_NAME)
 
 
 def _run_outbox_target(metadata: dict[str, Any]) -> dict[str, str] | None:
