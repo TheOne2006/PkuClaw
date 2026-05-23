@@ -84,7 +84,7 @@ uv run pkuclaw daemon
 - [在线文档站](https://theone2006.github.io/PkuClaw/)：正式发布的使用指南与开发者指南。
 - [快速开始文档](https://theone2006.github.io/PkuClaw/docs/user-guide/quickstart)：更完整的安装路径。
 - [配置说明](https://theone2006.github.io/PkuClaw/docs/user-guide/configuration)：启动期配置与 runtime 配置边界。
-- [Runtime 设计](https://theone2006.github.io/PkuClaw/docs/developer-guide/runtime)：realtime、loop、quick action 和 outbox 模型。
+- [开发者指南](https://theone2006.github.io/PkuClaw/docs/developer-guide)：runtime、Agent、Channel、Loop 和扩展开发。
 - [文档站维护说明](docs-site/README.md)：本地预览、构建和发布方式。
 - [架构说明](ARCHITECTURE.md)：CoreRuntime、AgentWrapper、LoopManager 和 outbox 的边界。
 - [pku3b README](crates/pku3b/README.md)：PKU Blackboard / Portal raw JSON CLI。

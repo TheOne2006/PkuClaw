@@ -1,0 +1,194 @@
+---
+title: Runtime 配置系统
+description: 理解 configs/runtime/* 的热加载边界、可提交模板和本地配置职责。
+---
+
+PkuClaw 把很多运行行为放进 `configs/runtime/*`，不是为了把配置做复杂，而是为了让 prompt、loop、quick action、skill 和通知策略可以：
+
+- 热加载；
+- 通过普通文件 diff review；
+- 避免为每次任务调整都改 Python 代码；
+- 把本地敏感目标和可提交模板分开；
+- 让 Agent 和 operator 都能看到同一套 runtime surface。
+
+## 两类配置：启动期与运行期
+
+| 层级 | 文件 | 是否热加载 | 是否提交 | 作用 |
+| --- | --- | --- | --- | --- |
+| 启动期配置 | `configs/config.toml` | 否 | 否 | daemon 启动所需的本地真实配置 |
+| 启动期模板 | `configs/config.example.toml` | 否 | 是 | 可提交示例 |
+| Runtime 本地配置 | `configs/runtime/runtime.json` | 是 | 否 | agent、Codex、loop、通知目标等本地 runtime 状态 |
+| Runtime 模板 | `configs/runtime/runtime.example.json` | 是 | 是 | 可提交模板，不含真实目标 |
+| Quick Actions | `configs/runtime/events.json` | 是 | 是 | 用户主动触发的 event catalog 和 channel mapping |
+| Prompt 模板 | `configs/runtime/prompts.json` | 是 | 是 | realtime / loop prompt 文案 |
+| Skill Catalog | `configs/runtime/skills.json` | 是 | 是 | skill 元数据和依赖 |
+| Skill 正文 | `configs/runtime/skills/**` | 是 | 是 | Agent 可按需读取的任务/工具规范 |
+
+## 启动期配置：`configs/config.toml`
+
+启动期配置决定 daemon 如何启动。例如：
+
+- 数据目录；
+- runtime config 目录；
+- 飞书 app id / secret 环境变量名；
+- 默认 agent provider；
+- Codex CLI 路径、sandbox、timeout、并发数；
+- notify queue 扫描间隔。
+
+这些配置在进程启动时读取，不作为 hot reload surface。修改后通常需要重启 daemon。
+
+相关代码：
+
+```text
+pkuclaw/config.py
+pkuclaw/runtime/bootstrap.py
+```
+
+## Runtime 配置：`runtime.json` 与 `runtime.example.json`
+
+`runtime.example.json` 是可提交模板；`runtime.json` 是本地真实 runtime 配置，默认不提交。
+
+典型结构：
+
+```json
+{
+  "schema_version": 1,
+  "agent": {
+    "provider": "codex",
+    "mode": "fixed",
+    "model": "gpt-5.5",
+    "reasoning_effort": "xhigh"
+  },
+  "codex": {
+    "sandbox": "danger-full-access",
+    "timeout_seconds": 1800
+  },
+  "loops": [
+    {
+      "id": "sync_notices",
+      "enabled": true,
+      "interval_seconds": 900,
+      "prompt": "检查课程作业/DDL、教学网公告和成绩变化……",
+      "suggested_skills": ["tasks/sync-notices.md"],
+      "sink_mode": "silent",
+      "default_channel": null,
+      "default_target_type": null,
+      "default_target_id": null,
+      "prevent_overlap": true,
+      "max_concurrent_runs": null
+    }
+  ],
+  "notifications": {
+    "policy": "important_only",
+    "default_channel": null,
+    "default_target_type": null,
+    "default_target_id": null
+  }
+}
+```
+
+`RuntimeConfigStore` 每次读取时都会校验 live config。如果 live `runtime.json` 损坏，daemon 会回退到上一次有效快照或默认配置，并带上 warning，而不是直接让后台进程崩掉。
+
+相关代码：
+
+```text
+pkuclaw/runtime/config.py
+```
+
+## Quick Action 配置：`events.json`
+
+`events.json` 定义用户主动触发的 realtime 任务：
+
+```text
+configs/runtime/events.json
+```
+
+它既保存 PkuClaw 内部 event id，也可以保存 channel 原始 key 到 event id 的映射。
+
+代码入口：
+
+```text
+pkuclaw/runtime/events.py
+pkuclaw/core/runtime.py
+```
+
+设计边界：
+
+- quick action 仍然创建 `source = "realtime"` run；
+- `suggested_skills` 是建议，不是强制全文注入；
+- channel 原始 key 的解析属于 adapter / events catalog，不属于 Agent prompt。
+
+## Prompt 模板：`prompts.json`
+
+Prompt 文案来自：
+
+```text
+configs/runtime/prompts.json
+```
+
+`AgentWrapper` 按 `source` 选择模板：
+
+| source | 模板 | 典型变量 |
+| --- | --- | --- |
+| `realtime` | `realtime.template` | `skill_catalog`、`suggested_skills`、`user_request` |
+| `loop` | `loop.template` | `loop_id`、`notify_policy`、`notification_target`、`task` |
+
+设计边界：
+
+- realtime prompt 不应该包含 loop-only 的通知规则；
+- loop prompt 不应该复用 realtime 的“直接回复用户”规则；
+- prompt 只渲染 skill catalog 和 suggested skill 元数据，不默认拼接所有 skill 正文。
+
+相关代码：
+
+```text
+pkuclaw/runtime/prompts.py
+pkuclaw/agents/wrapper.py
+```
+
+## Skill Catalog：`skills.json` 与 `skills/**`
+
+Skill 由两部分组成：
+
+```text
+configs/runtime/skills.json
+configs/runtime/skills/**
+```
+
+`skills.json` 是索引和元数据，`skills/**` 是 markdown 正文。Prompt 里默认只注入 catalog 元数据，Agent 需要时再按 path 读取正文。
+
+相关代码：
+
+```text
+pkuclaw/runtime/skills.py
+```
+
+## 本地文件与可提交文件边界
+
+不要提交：
+
+- `configs/config.toml`
+- `configs/runtime/runtime.json`
+- 真实 app secret、token、cookie
+- 真实 open id、chat id、用户私有 target id
+- `data/` 下的数据库、运行记录、notify queue 和 agent artifacts
+
+可以提交：
+
+- `configs/config.example.toml`
+- `configs/runtime/runtime.example.json`
+- `configs/runtime/events.json`
+- `configs/runtime/prompts.json`
+- `configs/runtime/skills.json`
+- `configs/runtime/skills/**`
+
+## 修改 runtime 文件时的原则
+
+- 保持 JSON schema version 稳定；
+- 尽量让示例使用占位符，不写真实用户目标；
+- prompt 改动要同步检查 realtime / loop 边界；
+- loop 默认保持低噪声；
+- skill 变更要同步更新 `skills.json`；
+- 行为变化要同步更新开发者指南和使用指南中对应页面。
+
+继续阅读 [Agent 执行链路](/docs/developer-guide/agent-runtime)，理解 runtime 文件如何进入一次 Agent run。

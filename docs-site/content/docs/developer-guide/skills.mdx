@@ -1,46 +1,155 @@
 ---
 title: Skill Catalog
-description: PkuClaw runtime skill 的目录、依赖和加载规则。
+description: 理解 runtime skill 如何作为 Agent 任务能力被发现、建议和读取。
 ---
 
-PkuClaw 的 skill source of truth 是：
+PkuClaw 的 skill 不是 Python 插件，也不是自动执行器。它是一组给 Agent 阅读的任务/工具规范，告诉 Agent：
+
+- 什么时候应该使用这项能力；
+- 执行步骤是什么；
+- 哪些操作必须确认；
+- 需要调用哪些本地工具；
+- 产物应该写到哪里；
+- 失败时如何向用户报告。
+
+Skill source of truth 是：
 
 ```text
 configs/runtime/skills.json
 configs/runtime/skills/**
 ```
 
-Prompt 中只渲染目录元数据。Agent 根据任务决定是否按 `path` 打开具体 markdown 文件。
+Prompt 中默认只渲染目录元数据。Agent 根据任务决定是否按 `path` 打开具体 markdown 文件。
+
+## 为什么只注入 catalog 元数据
+
+不把所有 skill markdown 全文塞进 prompt，有几个原因：
+
+- 降低 prompt 体积；
+- 避免无关工具污染任务判断；
+- 减少 Agent 误用敏感能力的概率；
+- 让 skill 通过文件路径保持可审计；
+- 让 quick action / loop 只提供 suggested skills，而不是强制注入全部正文。
+
+## Skill 目录建议
+
+当前 runtime skill 可以按职责分组：
+
+```text
+configs/runtime/skills/
+  runtime/   # 修改 runtime 文件、skill authoring 等维护规则
+  pku3b/     # PKU 教学网 / pku3b 安装与使用
+  tasks/     # 具体学习任务，例如同步通知、写笔记、做作业
+  tools/     # 可复用工具说明，例如 PDF 读取、数据解析、channel outbox
+```
+
+这只是命名空间，不是执行机制。Agent 是否读取某个 skill，取决于本次任务、Skill Catalog 和 Suggested Skills。
 
 ## Catalog 字段
+
+`skills.json` 中一条 skill 的常用字段：
 
 | 字段 | 说明 |
 | --- | --- |
 | `name` | 目录中的技能名。 |
-| `description` | 给 Agent 选择技能时看的简介。 |
 | `path` | skill markdown 相对 `configs/runtime/skills/` 的路径。 |
+| `description` | 给 Agent 选择技能时看的简介。 |
 | `dependencies` | 依赖的其他 skill。 |
 | `allowed_sources` | 允许在 `realtime`、`loop` 或两者中使用。 |
 | `requires_confirmation` | 执行敏感操作前是否需要用户确认。 |
 
-## Suggested skills 不是强制注入
+示例：
 
-Quick action 和 loop 都可以提供 `suggested_skills`，但这只是建议：
+```json
+{
+  "name": "tasks/sync-notices.md",
+  "path": "tasks/sync-notices.md",
+  "description": "通过 pku3b live/cache 数据同步课程通知、作业、DDL 和重要公告，并维护 PkuClaw 业务 snapshot/state。",
+  "dependencies": ["pku3b/usage.md", "tools/data-parser.md"],
+  "allowed_sources": ["realtime", "loop"],
+  "requires_confirmation": false
+}
+```
+
+## Skill 可见性
+
+`allowed_sources` 控制 skill 对哪类 run 可见：
+
+| allowed_sources | 含义 |
+| --- | --- |
+| `["realtime"]` | 只允许用户实时任务使用 |
+| `["loop"]` | 只允许后台 loop 使用 |
+| `["realtime", "loop"]` | 两类 run 都可用 |
+
+例如，登录、写配置、清缓存、提交作业这类高风险能力通常只应允许 realtime 使用，并要求用户确认；loop 不应该自动触发这些操作。
+
+## Suggested Skills 不是全文注入
+
+Quick action 和 loop 都可以提供 `suggested_skills`，但它只是建议：
 
 ```text
 Suggested skills for this run (read them by path if useful)
 ```
 
-Realtime prompt 会固定包含 `## Suggested Skills`；普通消息没有预设建议时显示
-`- none`。Agent 仍需根据任务判断是否打开这些文件。
+普通 realtime 用户消息没有预设建议时显示：
+
+```text
+- none
+```
+
+Agent 仍需根据任务判断是否打开这些文件。
+
+## Dependencies
+
+`dependencies` 用于表达一个 skill 依赖哪些其他 skill。例如同步通知任务可能依赖：
+
+```text
+tasks/sync-notices.md
+  -> pku3b/usage.md
+  -> tools/data-parser.md
+```
+
+解析 suggested skills 时，PkuClaw 会解析依赖关系，确保 Agent 能看到依赖 skill 的元数据和路径。
+
+## Channel Outbox Skill
+
+`tools/channel-outbox.md` 是特殊但仍然普通的 skill。它说明 Agent 如何调用：
+
+```text
+scripts/pkuclaw_outbox.py
+```
+
+loop run 会自动追加这个 skill，确保后台任务需要通知时知道唯一允许的通知出口。
+
+realtime run 默认不应发送 outbox text；只有需要交付图片或文件时，才按 prompt 和 skill 规则使用 image/file。
 
 ## Skill markdown 的职责
 
-建议每个 skill 保持单一职责，例如：
+每个 skill 应保持单一职责。推荐包含：
+
+```text
+# 标题
+
+## 什么时候使用
+
+## 前置条件
+
+## 执行步骤
+
+## 需要用户确认的操作
+
+## 产物和写入边界
+
+## 失败处理
+```
+
+任务类 skill 可以更具体，例如：
 
 - `tasks/sync-notices.md`：教学网通知/DDL 同步任务规则；
+- `tasks/write-notes.md`：课程笔记生产线；
+- `tasks/do-homework.md`：作业 dry-run 和附件解析；
 - `tools/channel-outbox.md`：outbox 脚本使用方式；
-- `runtime/authoring.md`：如何安全修改 runtime 文件。
+- `runtime/skill-authoring.md`：如何安全新增或修改 skill。
 
 ## 编写原则
 
@@ -49,3 +158,17 @@ Realtime prompt 会固定包含 `## Suggested Skills`；普通消息没有预设
 - 不写入密钥、token、用户隐私数据。
 - 给出可执行命令时说明前置条件和失败处理。
 - 如果依赖其他 skill，放进 catalog 的 `dependencies`。
+- 不把一次性任务写成长期通用能力。
+- 不让 loop 自动执行登录、提交作业、删除数据、安装依赖等高风险动作。
+- 修改 skill 正文时同步检查 `skills.json` 的 description、dependencies、allowed_sources。
+
+## 相关代码
+
+```text
+pkuclaw/runtime/skills.py
+pkuclaw/agents/wrapper.py
+configs/runtime/skills.json
+configs/runtime/skills/**
+```
+
+继续阅读 [扩展开发](/docs/developer-guide/extension-points)，按具体任务定位要改哪些文件。

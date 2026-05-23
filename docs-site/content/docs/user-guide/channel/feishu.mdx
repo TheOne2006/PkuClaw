@@ -1,0 +1,145 @@
+---
+title: 飞书
+description: 配置飞书应用、事件入口和后台通知目标。
+---
+
+飞书是当前 PkuClaw 主要支持的 channel。
+
+## 1. 配置飞书应用
+
+启动配置写在 `configs/config.toml`：
+
+```toml
+[feishu]
+app_id = "cli_xxx"
+app_secret_env = "FEISHU_APP_SECRET"
+event_mode = "websocket"
+```
+
+建议把 secret 放到环境变量，不写进配置文件：
+
+```bash
+export FEISHU_APP_SECRET="你的飞书 app secret"
+```
+
+也可以用环境变量覆盖部分字段：
+
+```bash
+export FEISHU_APP_ID="cli_xxx"
+export FEISHU_API_BASE="https://open.feishu.cn"
+```
+
+## 2. 选择启动方式
+
+只测试飞书实时消息：
+
+```bash
+uv run pkuclaw realtime feishu
+```
+
+启动完整 daemon：
+
+```bash
+uv run pkuclaw daemon
+```
+
+完整 daemon 会同时启用：
+
+- 飞书 channel；
+- `CoreRuntime`；
+- 后台 loop；
+- channel outbox queue worker。
+
+## 3. 配置后台通知目标
+
+后台 loop 不直接把消息发给某个人。它先写入 outbox 队列，再由 daemon 根据目标配置发送。
+
+默认通知目标写在本地 `configs/runtime/runtime.json`：
+
+```json
+{
+  "notifications": {
+    "policy": "important_only",
+    "default_channel": "feishu",
+    "default_target_type": "open_id",
+    "default_target_id": "ou_xxx"
+  }
+}
+```
+
+字段含义：
+
+| 字段 | 含义 |
+| --- | --- |
+| `policy` | 后台任务什么时候通知。默认 `important_only`，也就是只在重要变化或需要处理时通知。 |
+| `default_channel` | 默认发送渠道。飞书写 `feishu`。 |
+| `default_target_type` | 飞书接收 id 类型，常见是 `open_id` 或 `chat_id`。 |
+| `default_target_id` | 具体接收人或群聊 id。 |
+
+如果某个 loop 要发到不同目标，可以在该 loop 里覆盖：
+
+```json
+{
+  "loops": [
+    {
+      "id": "sync_notices",
+      "default_channel": "feishu",
+      "default_target_type": "chat_id",
+      "default_target_id": "oc_xxx"
+    }
+  ]
+}
+```
+
+目标字段要么三个都填，要么都不填。
+
+## 4. 理解 open_id 和 chat_id
+
+飞书里常见两类目标：
+
+| 类型 | 适合场景 |
+| --- | --- |
+| `open_id` | 发给某个用户。菜单事件通常能拿到操作者的 `open_id`。 |
+| `chat_id` | 发到某个会话或群聊。普通消息事件通常带有 `chat_id`。 |
+
+PkuClaw 的实时回复会优先回到触发本轮消息的会话。后台 loop 没有天然会话，所以需要在 `runtime.json` 里配置默认通知目标。
+
+## 5. Quick Action 映射
+
+飞书菜单或卡片事件会带一个平台原始 key。可以在 `configs/runtime/events.json` 里映射到 PkuClaw 的 event id：
+
+```json
+{
+  "channel_mappings": {
+    "feishu": {
+      "menu_weekly_deadlines": "weekly_deadlines"
+    }
+  }
+}
+```
+
+如果飞书侧 key 本身就是 PkuClaw event id，也可以直接透传，不写映射。
+
+## 6. 不要把目标写进可提交文件
+
+`open_id`、`chat_id` 虽然不是密码，但仍然是个人或群聊标识。
+
+不要把它们写进：
+
+- `configs/runtime/runtime.example.json`
+- 文档示例之外的可提交配置
+- skill 文件
+- prompt 文件
+
+只写在本地 `configs/runtime/runtime.json`。
+
+## 7. 检查清单
+
+启动前确认：
+
+- `configs/config.toml` 已存在；
+- `[feishu].app_id` 是真实飞书 app id；
+- `FEISHU_APP_SECRET` 已设置；
+- 飞书 app 已开启需要的事件订阅或 websocket 能力；
+- 如果要后台通知，`configs/runtime/runtime.json` 里配置了默认通知目标；
+- `data/notify_queue` 或配置中的 outbox queue 目录不要提交。

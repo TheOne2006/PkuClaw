@@ -1,22 +1,28 @@
 ---
-title: 配置说明
-description: 区分启动期 TOML 配置与可热加载 runtime 文件。
+title: 配置总览
+description: 先分清启动配置、runtime 配置和可编辑行为配置。
 ---
 
-PkuClaw 的配置分两层：
+PkuClaw 的配置不是一个文件解决全部问题。先把配置分清楚，后面改起来会容易很多。
 
-1. **启动期配置**：`configs/config.toml`，用于 daemon 启动时确定数据目录、渠道凭据、provider 默认值等。
-2. **运行时配置**：`configs/runtime/**`，由 AgentWrapper、LoopManager 等组件热读取，Agent 也可以在任务需要时直接读写。
+## 三类配置
 
-## 启动期配置
+| 类型 | 文件 | 主要回答什么问题 | 是否提交 |
+| --- | --- | --- | --- |
+| 启动配置 | `configs/config.toml` | daemon 启动时用哪个数据目录、哪个 channel、哪个 Codex CLI。 | 不提交 |
+| Runtime 配置 | `configs/runtime/runtime.json` | Agent 用什么模型、loop 多久跑一次、通知默认发给谁。 | 不提交 |
+| 可编辑行为配置 | `configs/runtime/events.json`、`prompts.json`、`skills.json`、`skills/**` | 快捷任务、prompt、skill catalog 怎么写。 | 可提交，但不要写私密数据 |
 
-从示例文件开始：
+第一次本地运行时，从模板复制：
 
 ```bash
 cp configs/config.example.toml configs/config.toml
+cp configs/runtime/runtime.example.json configs/runtime/runtime.json
 ```
 
-核心字段：
+## 启动配置：`configs/config.toml`
+
+这个文件在 daemon 启动时读取。它适合放“启动前就必须知道”的信息。
 
 ```toml
 [app]
@@ -24,6 +30,11 @@ name = "PKU Course Bot"
 data_dir = "data"
 runtime_config_dir = "configs/runtime"
 timezone = "Asia/Shanghai"
+
+[feishu]
+app_id = "cli_xxx"
+app_secret_env = "FEISHU_APP_SECRET"
+event_mode = "websocket"
 
 [agent]
 provider = "codex"
@@ -34,21 +45,27 @@ sandbox = "danger-full-access"
 model = "gpt-5.5"
 timeout_seconds = 1800
 max_concurrent_runs = 1
+
+[notify_queue]
+queue_dir = "notify_queue"
+scan_interval_seconds = 5
 ```
 
-:::caution
-`danger-full-access` 会让 Codex provider 使用 full-access/bypass 模式，适合可信本地 daemon。不要在不可信仓库、共享机器或未审计任务中随意启用；如改为更严格 sandbox，请预期部分 pku3b、文件读取或后台 loop 行为需要额外处理权限。
-:::
+常见需要你改的是：
+
+- `[feishu].app_id`
+- `FEISHU_APP_SECRET` 环境变量
+- `[codex].bin`
+- `[codex].model`
+- `[codex].sandbox`
 
 :::caution
-不要提交真实的 `configs/config.toml`、飞书 secret、用户 open id、token 或登录凭据。
+不要提交真实的 `configs/config.toml`、飞书 secret、token、cookie、用户 id 或本地路径。
 :::
 
-## Runtime 配置
+## Runtime 配置：`configs/runtime/runtime.json`
 
-`configs/runtime/runtime.example.json` 是可提交模板；复制为本地
-`configs/runtime/runtime.json` 后，daemon 会热加载其中的 agent、Codex、loop
-和通知策略：
+这个文件由 runtime 热读取，适合放“运行过程中可以调整”的本地行为。
 
 ```json
 {
@@ -67,41 +84,69 @@ max_concurrent_runs = 1
     {
       "id": "sync_notices",
       "enabled": true,
-      "interval_seconds": 1800,
-      "suggested_skills": ["tasks/sync-notices.md"],
+      "interval_seconds": 900,
+      "suggested_skills": [
+        "tasks/sync-notices.md"
+      ],
       "sink_mode": "silent"
     }
   ],
   "notifications": {
     "policy": "important_only",
-    "default_channel": "feishu",
-    "default_target_type": "open_id",
-    "default_target_id": "ou_xxx"
+    "default_channel": null,
+    "default_target_type": null,
+    "default_target_id": null
   }
 }
 ```
 
-## Quick actions
+重点字段：
 
-`configs/runtime/events.json` 定义用户主动触发的实时快捷任务。每个 event 会变成普通 `source = realtime` run。
+- `agent`：Agent provider、模型、reasoning effort。
+- `codex`：Codex sandbox、timeout。
+- `loops`：后台周期任务。
+- `notifications`：后台通知策略和默认目标。
 
-## Prompt 模板
+`runtime.json` 是本地文件，不提交。可提交的模板是：
 
-`configs/runtime/prompts.json` 定义 realtime 和 loop prompt 的文案。修改身份、规则、Objective、通知规则时优先改这个文件，而不是改 Python wrapper 代码。
+```text
+configs/runtime/runtime.example.json
+```
 
-## Skill Catalog
+## 可编辑行为配置
 
-`configs/runtime/skills.json` 是技能目录的 source of truth。Prompt 只注入目录元数据，不默认注入完整 skill markdown。
+这些文件会影响 PkuClaw “会做什么”和“怎样做”，但不应该写入私密凭据。
 
-## 配置边界
+| 文件 | 作用 |
+| --- | --- |
+| `configs/runtime/events.json` | 定义 Quick Actions，也就是用户主动触发的快捷任务。 |
+| `configs/runtime/prompts.json` | 定义 realtime 和 loop prompt 模板。 |
+| `configs/runtime/skills.json` | Skill Catalog，告诉 Agent 有哪些 skill 可读。 |
+| `configs/runtime/skills/**` | 每个 skill 的具体操作说明。 |
 
-| 类型 | 示例 | 是否热加载 | Agent 是否应直接修改 |
-| --- | --- | --- | --- |
-| 启动期配置 | `configs/config.toml` | 否 | 通常不应修改 |
-| Runtime 配置模板 | `configs/runtime/runtime.example.json` | 否 | 可以作为模板更新 |
-| Runtime 本地配置 | `configs/runtime/runtime.json` | 是 | 任务明确要求时可以，但不要提交 |
-| Quick actions | `configs/runtime/events.json` | 是 | 可以 |
-| Prompt 模板 | `configs/runtime/prompts.json` | 是 | 可以，但要谨慎 |
-| Skill Catalog | `configs/runtime/skills.json` 与 `skills/**` | 是 | 可以 |
+## 安全边界
 
-继续阅读 [Runtime 设计](/docs/developer-guide/runtime)。
+不要提交：
+
+- `configs/config.toml`
+- `configs/runtime/runtime.json`
+- 飞书 app secret
+- open id、chat id、cookie、token、账号、密码、OTP
+- `data/`、`logs/`、`tmp/`、`notify_queue/` 等运行产物
+
+可以提交：
+
+- `configs/config.example.toml`
+- `configs/runtime/runtime.example.json`
+- `configs/runtime/events.json`
+- `configs/runtime/prompts.json`
+- `configs/runtime/skills.json`
+- `configs/runtime/skills/**`
+
+前提是这些可提交文件里没有真实私密信息。
+
+## 下一步
+
+- 配飞书和通知目标：看 [Channel 配置](/docs/user-guide/channel)。
+- 配 Codex provider：看 [Agent 配置](/docs/user-guide/agent)。
+- 添加自己的任务能力：看 [Skill 配置与扩展](/docs/user-guide/skills)。

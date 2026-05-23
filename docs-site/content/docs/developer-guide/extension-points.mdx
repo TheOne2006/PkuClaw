@@ -1,0 +1,262 @@
+---
+title: 扩展开发
+description: 按“我要加什么功能”定位 PkuClaw 的改动点和边界。
+---
+
+这一页是开发者任务索引。先按你要扩展的能力定位文件，再决定是否需要改 Python 代码。
+
+## 加一个 Quick Action
+
+适合场景：
+
+- 飞书菜单一键“查看本周 DDL”；
+- 卡片按钮触发固定任务；
+- 用户主动触发的常用 realtime 任务。
+
+主要改：
+
+```text
+configs/runtime/events.json
+```
+
+涉及代码：
+
+```text
+pkuclaw/runtime/events.py
+pkuclaw/core/runtime.py
+pkuclaw/channels/feishu/*
+```
+
+注意：
+
+- quick action 仍然是 `source = "realtime"`；
+- `task` 要写成 Agent 可直接执行的用户任务；
+- `suggested_skills` 只是建议，不是全文注入；
+- channel 原始 key 到 PkuClaw event id 的映射写在 `channel_mappings`。
+
+## 加一个后台 Loop
+
+适合场景：
+
+- 定时检查课程公告；
+- 定时检查作业 DDL；
+- 定时生成低噪声摘要；
+- 定时维护本地 snapshot/state。
+
+主要改：
+
+```text
+configs/runtime/runtime.json
+configs/runtime/runtime.example.json
+```
+
+通常还要新增或调整：
+
+```text
+configs/runtime/skills/**
+configs/runtime/skills.json
+```
+
+涉及代码：
+
+```text
+pkuclaw/core/loops.py
+pkuclaw/core/runtime.py
+pkuclaw/runtime/config.py
+```
+
+注意：
+
+- loop 默认静默；
+- loop task 要明确哪些变化算重要；
+- loop 不应该自动登录、提交作业、删除文件或下载大附件；
+- 通知目标不要写进可提交模板；
+- 如果需要通知，使用 channel outbox skill。
+
+## 加一个 Skill
+
+适合场景：
+
+- 新增一个可复用学习任务；
+- 把复杂工具调用流程固化；
+- 给 Agent 明确安全边界；
+- 拆分已有过大的任务说明。
+
+新增或修改：
+
+```text
+configs/runtime/skills/<group>/<name>.md
+configs/runtime/skills.json
+```
+
+涉及代码：
+
+```text
+pkuclaw/runtime/skills.py
+```
+
+注意：
+
+- `description` 要写给 Agent 选择 skill 时看；
+- `allowed_sources` 要限制 realtime / loop 可见性；
+- 高风险操作设置 `requires_confirmation = true`；
+- 依赖其他 skill 时同步写入 `dependencies`；
+- 不要把密钥、cookie、open id、chat id 写进 skill。
+
+## 改 Prompt
+
+主要改：
+
+```text
+configs/runtime/prompts.json
+```
+
+涉及代码：
+
+```text
+pkuclaw/runtime/prompts.py
+pkuclaw/agents/wrapper.py
+```
+
+注意：
+
+- realtime prompt 面向当前用户对话；
+- loop prompt 面向后台任务和通知策略；
+- 不要把 loop 通知规则塞进 realtime 普通回复；
+- 不要让 loop final answer 被误认为用户可见输出；
+- Skill Catalog 只注入元数据，除非明确读取 skill 正文。
+
+## 加一个 Channel
+
+适合场景：
+
+- 新增企业微信、邮件、Web UI、Telegram 等平台；
+- 支持另一种消息接入和投递方式。
+
+需要实现：
+
+```text
+Channel Adapter
+Channel Outbound Backend
+Channel Event Sink
+```
+
+核心协议：
+
+```text
+pkuclaw/channels/base.py
+```
+
+参考：
+
+```text
+pkuclaw/channels/feishu/*
+pkuclaw/runtime/bootstrap.py
+```
+
+通常需要：
+
+1. 把平台事件转换成 `ChannelInboundMessage`；
+2. 把回复目标表示成 `ChannelTarget`；
+3. 实现 `send_text/send_card/send_image/send_file/update_card`；
+4. 在 bootstrap 中注册 backend；
+5. 如果支持 quick action，接入 `events.json` 的 channel mapping。
+
+注意：
+
+- 不要把平台 SDK 细节放进 `CoreRuntime`；
+- 不要让 Agent prompt 直接看到 token、secret 或真实 target id；
+- channel backend 负责平台格式，core 只处理 channel-neutral 目标。
+
+## 加一个 Agent Provider
+
+适合场景：
+
+- 支持非 Codex 的执行后端；
+- 引入不同 agent runtime；
+- 做 provider A/B 或本地 mock provider。
+
+需要实现：
+
+```text
+pkuclaw/agents/base.py 中的 Agent protocol
+```
+
+新增文件建议放在：
+
+```text
+pkuclaw/agents/providers/<provider>.py
+```
+
+还需要修改：
+
+```text
+pkuclaw/agents/wrapper.py
+```
+
+步骤：
+
+1. 实现 `execute(context, prompt, sink)`；
+2. 定义 provider 如何读取 `AgentRunContext`；
+3. 把 provider 事件归一化成 `AgentEvent`；
+4. 在 `AgentWrapper._select_agent()` 中注册；
+5. 更新 runtime config schema、示例和文档；
+6. 为 realtime 和 loop 各加至少一条验证路径。
+
+注意：
+
+- provider 不应该重新判断入口类型；
+- provider 应尊重 `context.agent_settings`；
+- provider 应写入结果和错误；
+- provider 不应绕过 outbox 直接发 channel 消息。
+
+## 加一个 runtime 配置字段
+
+如果新增字段属于 daemon 启动期，改：
+
+```text
+configs/config.example.toml
+pkuclaw/config.py
+```
+
+如果新增字段属于 runtime 热加载，改：
+
+```text
+configs/runtime/runtime.example.json
+pkuclaw/runtime/config.py
+```
+
+并同步更新：
+
+```text
+docs-site/content/docs/developer-guide/runtime-files.mdx
+docs-site/content/docs/user-guide/*
+```
+
+注意：
+
+- 明确是否热加载；
+- 明确是否可提交；
+- 明确是否可能包含敏感目标；
+- schema version 不要随意变更；
+- live config 损坏时要有可理解的 warning 或 fallback。
+
+## 加一个测试或验证入口
+
+普通 Python/runtime 改动至少运行：
+
+```bash
+python -m compileall pkuclaw scripts
+python -m unittest discover
+```
+
+文档站改动运行：
+
+```bash
+cd docs-site
+npm run build
+```
+
+如果改的是 channel 或 provider，优先补充能覆盖边界的单元测试，避免只靠真实平台手测。
+
+继续阅读 [开发与贡献工作流](/docs/developer-guide/development)，确认提交前的边界和验证要求。

@@ -3,9 +3,11 @@
   "pages": [
     "index",
     "quickstart",
-    "installation",
     "configuration",
-    "quick-actions",
-    "faq"
+    "channel",
+    "agent",
+    "skills",
+    "pku-login",
+    "quick-actions"
   ]
 }

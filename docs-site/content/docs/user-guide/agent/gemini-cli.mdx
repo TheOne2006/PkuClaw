@@ -1,0 +1,61 @@
+---
+title: Gemini CLI
+description: Gemini CLI provider 的预留配置页。
+---
+
+Gemini CLI provider 当前还没有在 PkuClaw 中实现。
+
+这一页只是预留配置入口。现在不要把 `provider = "gemini-cli"` 当成可用配置。
+
+## 当前状态
+
+| 项目 | 状态 |
+| --- | --- |
+| Gemini CLI provider 执行器 | 未实现 |
+| `configs/config.toml` schema | 未定义 |
+| `configs/runtime/runtime.json` 覆盖字段 | 未定义 |
+| realtime 支持 | 未实现 |
+| loop 支持 | 未实现 |
+
+## 未来可能需要的配置
+
+真正实现后，可能需要类似这样的启动配置：
+
+```toml
+[agent]
+provider = "gemini-cli"
+
+[gemini]
+bin = "gemini"
+model = "..."
+timeout_seconds = 1800
+max_concurrent_runs = 1
+```
+
+也可能需要 runtime 覆盖：
+
+```json
+{
+  "agent": {
+    "provider": "gemini-cli",
+    "model": "..."
+  }
+}
+```
+
+这些字段目前只是方向，不是已支持 schema。
+
+## 实现前需要解决的问题
+
+接入 Gemini CLI 前，至少需要明确：
+
+- CLI 是否支持稳定的非交互式输入输出；
+- 如何配置 API key 或账号状态；
+- 如何处理网络、限流和超时；
+- 如何把输出解析成 PkuClaw 的 run result；
+- loop 中是否允许调用，以及失败时如何通知用户；
+- 如何避免把密钥和课程数据写入日志。
+
+## 当前应该怎么做
+
+现在请继续使用 [Codex](/docs/user-guide/agent/codex)。

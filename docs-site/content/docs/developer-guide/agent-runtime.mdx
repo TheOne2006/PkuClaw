@@ -1,0 +1,168 @@
+---
+title: Agent 执行链路
+description: 理解 CoreRuntime、AgentWrapper、Agent protocol 与 CodexAgent 的职责边界。
+---
+
+PkuClaw 不让 `CoreRuntime` 直接调用 Codex。中间隔了一层 `AgentWrapper`，再由具体 `AgentProvider` 执行。
+
+```text
+CoreRuntime
+  -> AgentRunRequest
+  -> AgentWrapper.prepare()
+  -> run record
+  -> AgentWrapper.run()
+  -> AgentRunContext + prompt
+  -> Agent protocol
+  -> CodexAgent
+```
+
+## 分层职责
+
+| 层 | 职责 | 不负责 |
+| --- | --- | --- |
+| `CoreRuntime` | 创建 realtime / loop run 请求，保留 channel context | 拼 prompt、调用 Codex CLI |
+| `AgentWrapper` | 编译一次 run：读配置、建上下文、渲染 prompt、选 provider、保存结果 | 处理平台原始事件 |
+| `Agent` protocol | 定义 provider 执行接口 | 规定 provider 必须用 Codex |
+| `CodexAgent` | 调用 Codex CLI，转发 streaming 事件，收集结果 | 决定业务入口类型 |
+
+代码映射：
+
+```text
+pkuclaw/core/runtime.py
+pkuclaw/agents/wrapper.py
+pkuclaw/agents/base.py
+pkuclaw/agents/providers/codex.py
+```
+
+## AgentRunRequest
+
+`CoreRuntime` 交给 `AgentWrapper` 的标准请求是 `AgentRunRequest`：
+
+```text
+source: realtime | loop
+conversation_id
+text
+suggested_skills
+channel
+sender_id
+channel_context
+sink_mode
+```
+
+最重要的是 `source`。当前只允许：
+
+```text
+realtime
+loop
+```
+
+如果要扩展新入口，优先思考它是否仍然可以归入这两类，而不是新增第三类 run source。
+
+## prepare：创建 run record
+
+`AgentWrapper.prepare()` 做的事很少：
+
+```text
+AgentRunRequest + TaskPlan
+-> Store.create_run()
+-> PreparedAgentRun(run_id, request, plan)
+```
+
+它不会构造 prompt，也不会启动 provider。这样 channel gateway 或 loop scheduler 可以先拿到 `run_id` 和 ack，再决定如何异步执行。
+
+## run：构造上下文并执行 provider
+
+`AgentWrapper.run()` 才是真正执行的一步：
+
+1. 从 Store 读取 run record；
+2. 调用 `_build_context()`；
+3. 渲染 prompt；
+4. 写入 prompt artifact；
+5. 标记 run running；
+6. 选择 concrete provider；
+7. 调用 `agent.execute(context, prompt, sink)`；
+8. 根据结果标记 succeeded / failed。
+
+## AgentRunContext
+
+`AgentRunContext` 是 provider 执行时看到的只读上下文，包含：
+
+| 字段 | 来源 |
+| --- | --- |
+| `run` | Store 中的 run record |
+| `request` | `CoreRuntime` 创建的 `AgentRunRequest` |
+| `plan` | `TaskPlan` |
+| `conversation` | Store 中的 conversation |
+| `runtime` | `RuntimeConfigStore.read_snapshot()` |
+| `agent_settings` | runtime defaults 与 conversation overrides 合并结果 |
+| `paths` | 本次 run 的 prompt/result/stdout/stderr 路径 |
+| `repo_root` | provider 执行工作区 |
+| `skill_catalog_text` | 当前 source 可见的 skill catalog |
+| `rendered_skills` | suggested skills 的元数据 |
+| `warnings` | runtime / skill catalog 读取警告 |
+
+## Prompt 构建
+
+`AgentWrapper.build_run_prompt()` 按 `source` 分发：
+
+```text
+source = realtime -> _build_realtime_prompt()
+source = loop     -> _build_loop_prompt()
+```
+
+realtime prompt 主要包含：
+
+- 身份与回复规则；
+- Skill Catalog；
+- Suggested Skills；
+- User Request。
+
+loop prompt 主要包含：
+
+- loop id、scheduled_at、sink_mode；
+- notify policy 和说明；
+- notification target 摘要；
+- Skill Catalog；
+- Suggested Skills；
+- Task。
+
+设计要求：
+
+- realtime 默认只在当前对话中回复，不发送 outbox text；
+- loop final answer 主要用于日志和 artifacts，用户可见通知必须走 outbox；
+- prompt 模板来自 `configs/runtime/prompts.json`，不要硬编码进 wrapper。
+
+## Provider 选择
+
+当前 provider 选择逻辑很简单：
+
+```text
+AgentWrapper._select_agent()
+  provider == "codex" -> CodexAgent
+```
+
+如果将来新增 provider，需要：
+
+1. 实现 `pkuclaw/agents/base.py` 中的 `Agent` protocol；
+2. 定义 provider 自己如何消费 `AgentRunContext` 和 prompt；
+3. 在 `AgentWrapper._select_agent()` 中注册；
+4. 更新 runtime config schema 和文档；
+5. 增加测试，确保 realtime / loop prompt 边界不被破坏。
+
+## CodexAgent 的特殊职责
+
+`CodexAgent` 负责和 Codex CLI 对接，包括：
+
+- 合并 model / reasoning effort / sandbox / timeout；
+- 设置 outbox 相关环境变量：
+  - `PKUCLAW_OUTBOX_QUEUE_DIR`
+  - `PKUCLAW_RUN_ID`
+  - `PKUCLAW_RUN_SOURCE`
+  - `PKUCLAW_LOOP_ID`
+- 解析 Codex JSONL 事件；
+- 将 provider 事件转换成 `AgentEvent`；
+- 写入 stdout、stderr、result artifacts。
+
+Provider 可以知道运行环境和 artifact 路径，但不应该重新判断“这是用户消息还是 loop”。这个判断已经由 `source` 和 prompt 完成。
+
+继续阅读 [Channel 与 Outbox](/docs/developer-guide/channels-and-outbox)，理解 Agent 输出如何回到用户可见 channel。

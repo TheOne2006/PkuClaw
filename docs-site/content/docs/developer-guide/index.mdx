@@ -1,24 +1,38 @@
 ---
 title: 开发者指南
-description: 面向贡献者和维护者的架构、runtime、skill 与代码修改指南。
+description: 面向贡献者和维护者的 PkuClaw runtime、配置、Agent、Channel 与扩展指南。
 ---
 
-开发者指南只关注 PkuClaw 的内部结构、runtime 边界、prompt/skill 维护和贡献流程。它与使用指南平行存在，不作为普通使用流程的下一步。
+开发者指南解释 PkuClaw **为什么这样设计**、**一次任务怎样跑起来**，以及开发者应该在哪一层扩展功能。
+
+如果你只是想安装、配置并使用 PkuClaw，请转到 [使用指南](/docs/user-guide)。本部分默认你准备阅读或修改代码、runtime 文件、prompt、skill、channel 或后台 loop。
+
+## 先理解三件事
+
+1. **PkuClaw 是 channel + loop + agent runtime**：用户消息、飞书菜单和后台周期任务都会进入同一个 `CoreRuntime` 控制面。
+2. **运行行为尽量配置化**：quick action、loop、prompt、skill catalog 和通知策略主要来自 `configs/runtime/*`，便于热加载和通过文件 diff review。
+3. **Agent 不直接碰平台 API**：realtime 默认流式回复当前对话；后台通知通过 channel outbox 写入本地队列，再由 daemon 投递到飞书等 channel。
 
 <Cards>
-  <Card title="架构说明" href="/docs/developer-guide/architecture" description="理解 CoreRuntime、AgentWrapper、LoopManager 和 channel outbox。" />
-  <Card title="Runtime 设计" href="/docs/developer-guide/runtime" description="理解 realtime、loop、runtime files 和 outbox 的边界。" />
-  <Card title="Skill Catalog" href="/docs/developer-guide/skills" description="维护 runtime skill 的目录、依赖和加载规则。" />
-  <Card title="开发工作流" href="/docs/developer-guide/development" description="修改代码、prompt 或 runtime 文件前的约束与验证。" />
+  <Card title="架构与产品逻辑" href="/docs/developer-guide/architecture" description="从总图理解 channel、CoreRuntime、AgentWrapper、loop 和 outbox。" />
+  <Card title="请求生命周期" href="/docs/developer-guide/request-lifecycle" description="跟踪 realtime、quick action 和 loop 三条链路。" />
+  <Card title="Runtime 配置系统" href="/docs/developer-guide/runtime-files" description="理解 configs/runtime/* 为什么存在、谁热加载、谁可提交。" />
+  <Card title="Agent 执行链路" href="/docs/developer-guide/agent-runtime" description="理解 AgentWrapper、AgentProvider 和 CodexAgent 的职责边界。" />
+  <Card title="Channel 与 Outbox" href="/docs/developer-guide/channels-and-outbox" description="理解平台接入、反向通知和本地 outbox 队列。" />
+  <Card title="Loop 与通知策略" href="/docs/developer-guide/loops-and-notifications" description="理解后台调度、静默默认和通知目标解析。" />
+  <Card title="Skill Catalog" href="/docs/developer-guide/skills" description="理解 runtime skill 如何被发现、建议和读取。" />
+  <Card title="扩展开发" href="/docs/developer-guide/extension-points" description="按任务索引查找如何加 quick action、loop、skill、channel 或 provider。" />
+  <Card title="开发与贡献工作流" href="/docs/developer-guide/development" description="确认代码目录归属、边界约束和验证命令。" />
 </Cards>
 
 ## 推荐顺序
 
-1. [架构说明](/docs/developer-guide/architecture)：先建立整体模块地图。
-2. [Runtime 设计](/docs/developer-guide/runtime)：确认 realtime、loop 和 outbox 的边界。
-3. [Skill Catalog](/docs/developer-guide/skills)：理解 prompt 只注入目录元数据的设计。
-4. [开发工作流](/docs/developer-guide/development)：按约束修改代码和文档。
-5. [配置文件参考](/docs/developer-guide/config-files)：查启动期配置和 runtime 文件格式。
-6. [参与贡献](/docs/developer-guide/contributing)：提交 PR 前检查贡献规范。
-
-如果你只是想安装、配置并使用 PkuClaw，请转到 [使用指南](/docs/user-guide)。
+1. [架构与产品逻辑](/docs/developer-guide/architecture)：先建立整体心智模型。
+2. [请求生命周期](/docs/developer-guide/request-lifecycle)：再看一次用户消息、菜单和后台 loop 分别怎么跑。
+3. [Runtime 配置系统](/docs/developer-guide/runtime-files)：理解配置文件为什么多、热加载边界在哪里。
+4. [Agent 执行链路](/docs/developer-guide/agent-runtime)：看 `CoreRuntime` 如何交给 `AgentWrapper` 和 provider。
+5. [Channel 与 Outbox](/docs/developer-guide/channels-and-outbox)：理解平台接入和反向通知。
+6. [Loop 与通知策略](/docs/developer-guide/loops-and-notifications)：理解后台任务为什么默认静默。
+7. [Skill Catalog](/docs/developer-guide/skills)：理解 task/tool 能力如何暴露给 Agent。
+8. [扩展开发](/docs/developer-guide/extension-points)：按“我要加什么功能”定位改动点。
+9. [开发与贡献工作流](/docs/developer-guide/development)：提交前确认边界、测试和文档同步。

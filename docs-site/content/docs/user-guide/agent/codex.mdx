@@ -1,0 +1,118 @@
+---
+title: Codex
+description: 配置 Codex CLI provider、模型、sandbox 和超时。
+---
+
+Codex 是当前 PkuClaw 默认使用的 Agent provider。
+
+## 1. 启动期默认值
+
+`configs/config.toml` 里有两段和 Codex 有关：
+
+```toml
+[agent]
+provider = "codex"
+
+[codex]
+bin = "codex"
+sandbox = "danger-full-access"
+model = "gpt-5.5"
+timeout_seconds = 1800
+max_concurrent_runs = 1
+```
+
+字段含义：
+
+| 字段 | 说明 |
+| --- | --- |
+| `[agent].provider` | 当前使用哪个 Agent provider。默认 `codex`。 |
+| `[codex].bin` | Codex CLI 可执行文件名或路径。 |
+| `[codex].sandbox` | Codex CLI 的 sandbox 模式。 |
+| `[codex].model` | 默认模型。 |
+| `[codex].timeout_seconds` | 单次 Agent run 的超时时间。 |
+| `[codex].max_concurrent_runs` | daemon 层允许的最大并发 run 数。 |
+
+先确认本机能找到 Codex CLI：
+
+```bash
+codex --help
+```
+
+如果你的 Codex CLI 不在 PATH，把 `[codex].bin` 改成实际路径。
+
+## 2. Runtime 覆盖
+
+`configs/runtime/runtime.json` 可以覆盖部分 Codex 行为：
+
+```json
+{
+  "agent": {
+    "provider": "codex",
+    "mode": "fixed",
+    "model": "gpt-5.5",
+    "reasoning_effort": "xhigh"
+  },
+  "codex": {
+    "sandbox": "danger-full-access",
+    "timeout_seconds": 1800
+  }
+}
+```
+
+字段含义：
+
+| 字段 | 说明 |
+| --- | --- |
+| `agent.provider` | 当前仍应为 `codex`。 |
+| `agent.mode` | 当前默认是固定配置模式。 |
+| `agent.model` | 本地 runtime 使用的模型。 |
+| `agent.reasoning_effort` | Codex reasoning effort，例如 `medium`、`high`、`xhigh`。 |
+| `codex.sandbox` | runtime 层覆盖 sandbox。 |
+| `codex.timeout_seconds` | runtime 层覆盖超时。 |
+
+一般优先改 `runtime.json`，因为它是本地运行时配置；如果要改默认模板，再同步评估是否应该改 `runtime.example.json`。
+
+## 3. 关于 `danger-full-access`
+
+示例配置使用：
+
+```toml
+sandbox = "danger-full-access"
+```
+
+这会让 PkuClaw 以 Codex full-access / bypass 模式执行任务，适合可信本机 daemon，因为后台 loop 可能需要：
+
+- 读取本地 runtime 文件；
+- 调用 `pku3b`；
+- 读写 `data/` 下的状态；
+- 通过 outbox 写通知队列。
+
+:::caution
+只在你信任当前仓库、当前机器和当前 runtime 配置时使用 `danger-full-access`。不要在不可信仓库、共享机器或未审计任务中随意启用。
+:::
+
+如果你改成更严格的 sandbox，要预期一些教学网读取、文件访问或后台 loop 行为会被权限、网络或审批阻塞。
+
+## 4. 检查清单
+
+修改后建议运行：
+
+```bash
+python -m compileall pkuclaw scripts
+python - <<'PY'
+from pathlib import Path
+from pkuclaw.runtime.config import RuntimeConfigStore
+
+root = Path('configs/runtime')
+snapshot = RuntimeConfigStore(root).read_snapshot()
+print(snapshot.agent)
+print(snapshot.codex)
+print(snapshot.warnings)
+PY
+```
+
+然后再启动：
+
+```bash
+uv run pkuclaw realtime feishu
+```

@@ -1,0 +1,85 @@
+---
+title: Agent 配置
+description: 先理解 Agent provider 总览，再配置具体 provider。
+---
+
+PkuClaw 自己不是大模型。它会把任务交给一个 Agent provider。
+
+当前默认 provider 是 Codex CLI。
+
+## 当前页面结构
+
+<Cards>
+  <Card title="Codex" href="/docs/user-guide/agent/codex" description="当前默认 provider：配置 Codex CLI、模型、sandbox、reasoning 和超时。" />
+  <Card title="Claude Code" href="/docs/user-guide/agent/claude-code" description="预留 provider：当前未实现，只说明未来接入时需要什么。" />
+  <Card title="Gemini CLI" href="/docs/user-guide/agent/gemini-cli" description="预留 provider：当前未实现，只说明未来接入边界。" />
+  <Card title="OpenAI API" href="/docs/user-guide/agent/openai-api" description="预留 provider：当前未实现，不要当作已支持配置。" />
+  <Card title="其他 Provider" href="/docs/user-guide/agent/other-providers" description="未知或自定义 provider 的预留说明。" />
+</Cards>
+
+## 配置分工
+
+Agent 配置通常分两层：
+
+| 配置层 | 文件 | 作用 |
+| --- | --- | --- |
+| 启动配置 | `configs/config.toml` | daemon 启动时的 provider 默认值和 CLI 路径。 |
+| Runtime 配置 | `configs/runtime/runtime.json` | 可热加载的模型、reasoning、sandbox 和 timeout 覆盖。 |
+
+当前只有 Codex 是已实现路径。其他 provider 页面只是为了把文档结构提前留好，避免以后扩展时再重排。
+
+Codex 启动配置示例：
+
+```toml
+[agent]
+provider = "codex"
+
+[codex]
+bin = "codex"
+sandbox = "danger-full-access"
+model = "gpt-5.5"
+timeout_seconds = 1800
+max_concurrent_runs = 1
+```
+
+Runtime 覆盖示例：
+
+```json
+{
+  "agent": {
+    "provider": "codex",
+    "mode": "fixed",
+    "model": "gpt-5.5",
+    "reasoning_effort": "xhigh"
+  },
+  "codex": {
+    "sandbox": "danger-full-access",
+    "timeout_seconds": 1800
+  }
+}
+```
+
+## Provider 页面应该写什么
+
+每个 provider 页面都应该至少说明：
+
+- 当前是否已实现；
+- 启动配置写在哪里；
+- runtime 覆盖写在哪里；
+- 需要哪些凭据或本地 CLI；
+- realtime 和 loop 是否都支持；
+- sandbox、权限、超时和并发边界；
+- 最小验证命令。
+
+未实现的 provider 不要写成“配置后可用”。只能写预期配置方向和当前不可用边界。
+
+## Realtime 和 loop 的关系
+
+Realtime 和 loop 都会使用 Agent provider，但触发方式不同：
+
+| 来源 | 触发方式 | 常见配置影响 |
+| --- | --- | --- |
+| realtime | 用户消息、飞书事件、Quick Action | 模型、reasoning、sandbox、timeout。 |
+| loop | `runtime.json` 里的后台周期任务 | 模型、reasoning、sandbox、timeout、loop interval、通知策略。 |
+
+如果你把模型换小，实时回复和后台 loop 都可能变快，但复杂任务能力会下降。如果你把 timeout 调太短，教学网查询或长任务更容易失败。
