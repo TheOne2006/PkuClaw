@@ -28,6 +28,7 @@ SNAPSHOT_KEYS = {
     "source",
     "status",
     "assignments",
+    "grades",
     "announcements",
     "timetable",
     "errors",
@@ -37,8 +38,9 @@ SNAPSHOT_KEYS = {
 字段约定：
 
 - `status`: `ok | partial | stale | auth_required | otp_required | tool_missing | network_error | parse_error | unavailable`
-- `assignments[*].urgent_level`: `overdue | due_24h | due_7d | normal | done | unknown`
+- `assignments[*].urgent_level`: `overdue | due_24h | due_72h | due_7d | normal | done | unknown`
 - `assignments[*].submission_summary` 来自 pku3b `assignments list`；归一化后保留 `submitted`、`latest_attempt_id`、`score`、`submitted_file_count`、`feedback_available`。
+- `grades[*]` 来自各当前课程的 `courses grades --id <course_id>`；归一化后保留课程、标题、类别、分数、满分、状态和更新时间线索。
 - `due_at` 优先使用 ISO-8601；无法解析时保留 `due_text`。
 - `source` 推荐使用 `pku3b-live-cache` 表示来自 pku3b 当前可用数据；不要在 PkuClaw 侧猜测其底层是网络还是 cache。
 
@@ -112,8 +114,23 @@ def normalize_announcement(item: dict) -> dict:
     }
 
 
+def normalize_grade(item: dict) -> dict:
+    return {
+        "id": str(item.get("id") or item.get("grade_id") or "").strip(),
+        "course_id": str(item.get("course_id") or "").strip(),
+        "course": normalize_course(item.get("course")),
+        "title": str(item.get("title") or item.get("name") or item.get("column") or "").strip(),
+        "category": str(item.get("category") or item.get("type") or "").strip(),
+        "score": str(item.get("score") or item.get("grade") or item.get("points") or "").strip(),
+        "points_possible": str(item.get("points_possible") or item.get("max_score") or item.get("full_score") or "").strip(),
+        "status": str(item.get("status") or "").strip(),
+        "last_activity_at": str(item.get("last_activity_at") or item.get("updated_at") or "").strip(),
+        "raw_updated_at": str(item.get("raw_updated_at") or item.get("last_modified") or "").strip(),
+    }
+
+
 def normalize_urgent_level(value, status=None, due_text=None) -> str:
-    allowed = {"overdue", "due_24h", "due_7d", "normal", "done", "unknown"}
+    allowed = {"overdue", "due_24h", "due_72h", "due_7d", "normal", "done", "unknown"}
     raw = str(value or "").strip()
     if raw in allowed:
         return raw
@@ -125,9 +142,18 @@ def normalize_urgent_level(value, status=None, due_text=None) -> str:
     m = re.search(r"in\s*(\d+)\s*d", text)
     if m:
         days = int(m.group(1))
+        if days <= 1:
+            return "due_24h"
+        if days <= 3:
+            return "due_72h"
         return "due_7d" if days <= 7 else "normal"
     if re.search(r"in\s*(\d+)\s*h", text):
-        return "due_24h"
+        hours = int(re.search(r"in\s*(\d+)\s*h", text).group(1))
+        if hours <= 24:
+            return "due_24h"
+        if hours <= 72:
+            return "due_72h"
+        return "due_7d" if hours <= 168 else "normal"
     return "unknown"
 ```
 
@@ -162,10 +188,16 @@ def announcement_key(item: dict) -> str:
     return item.get("id") or f"{item.get('course')}::{item.get('title')}"
 
 
+def grade_key(item: dict) -> str:
+    return item.get("id") or f"{item.get('course_id')}::{item.get('course')}::{item.get('title')}::{item.get('category')}"
+
+
 def diff_snapshot(old: dict | None, new: dict) -> dict:
     old = old or {}
     old_asg = {assignment_key(normalize_assignment(x)): normalize_assignment(x) for x in old.get("assignments", [])}
     new_asg = {assignment_key(normalize_assignment(x)): normalize_assignment(x) for x in new.get("assignments", [])}
+    old_grade = {grade_key(normalize_grade(x)): normalize_grade(x) for x in old.get("grades", [])}
+    new_grade = {grade_key(normalize_grade(x)): normalize_grade(x) for x in new.get("grades", [])}
     old_ann = {announcement_key(normalize_announcement(x)): normalize_announcement(x) for x in old.get("announcements", [])}
     new_ann = {announcement_key(normalize_announcement(x)): normalize_announcement(x) for x in new.get("announcements", [])}
 
@@ -183,6 +215,7 @@ def diff_snapshot(old: dict | None, new: dict) -> dict:
             before.get("feedback_available"),
             before.get("due_at"),
             before.get("due_text"),
+            before.get("urgent_level"),
         ) != (
             item.get("status"),
             item.get("submitted"),
@@ -192,12 +225,42 @@ def diff_snapshot(old: dict | None, new: dict) -> dict:
             item.get("feedback_available"),
             item.get("due_at"),
             item.get("due_text"),
+            item.get("urgent_level"),
         ):
             changed_assignments.append({"change": "updated", **item})
 
+    changed_grades = []
+    for key, item in new_grade.items():
+        before = old_grade.get(key)
+        if before is None:
+            changed_grades.append({"change": "new", **item})
+        elif (
+            before.get("score"),
+            before.get("points_possible"),
+            before.get("status"),
+            before.get("last_activity_at"),
+            before.get("raw_updated_at"),
+        ) != (
+            item.get("score"),
+            item.get("points_possible"),
+            item.get("status"),
+            item.get("last_activity_at"),
+            item.get("raw_updated_at"),
+        ):
+            changed_grades.append({"change": "updated", **item})
+
     urgent_assignments = [
         item for item in new_asg.values()
-        if item.get("urgent_level") in {"overdue", "due_24h"}
+        if item.get("urgent_level") in {"overdue", "due_24h", "due_72h"}
+    ]
+    reminder_assignments = [
+        item for key, item in new_asg.items()
+        if item.get("urgent_level") in {"overdue", "due_24h", "due_72h"}
+        and not item.get("submitted")
+        and (
+            key not in old_asg
+            or old_asg[key].get("urgent_level") != item.get("urgent_level")
+        )
     ]
     new_announcements = [
         item for key, item in new_ann.items()
@@ -207,16 +270,19 @@ def diff_snapshot(old: dict | None, new: dict) -> dict:
 
     return {
         "changed_assignments": changed_assignments,
+        "changed_grades": changed_grades,
         "urgent_assignments": urgent_assignments,
+        "reminder_assignments": reminder_assignments,
         "new_announcements": new_announcements,
         "bad_status": bad_status,
-        "important": bool(changed_assignments or urgent_assignments or new_announcements or bad_status),
+        "important": bool(changed_assignments or changed_grades or reminder_assignments or new_announcements or bad_status),
     }
 ```
 
 ## 摘要原则
 
-- 先列 `overdue/due_24h`，再列 `due_7d`；
+- 先列 `overdue/due_24h`，再列 `due_72h`，最后列 `due_7d`；
+- 成绩变化单独列出课程和成绩项；没有成绩变化时不要为了课件/课程内容变化打扰用户；
 - 按课程聚合，避免逐条刷屏；
 - 对 `partial/stale/auth_required/tool_missing` 明确标注数据可信度；
 - 不输出凭据、完整错误日志或内部长路径。

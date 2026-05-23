@@ -15,7 +15,7 @@
       "id": "sync_notices",
       "enabled": true,
       "interval_seconds": 900,
-      "prompt": "检查课程状态、教学网通知和本地数据。如果没有重要变化，保持静默；如果发现重要变化，使用 Channel Outbox Skill 发送简洁 text/image/file 通知用户。",
+      "prompt": "检查课程作业/DDL、教学网公告和成绩变化；不要监控课件或课程内容目录变化。如果没有重要变化，保持静默；如果发现成绩变化、未提交 DDL 进入 72 小时/24 小时窗口、逾期或重要公告，使用 Channel Outbox Skill 发送简洁 text/image/file 通知用户。",
       "suggested_skills": [
         "tasks/sync-notices.md"
       ],
