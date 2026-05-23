@@ -1,7 +1,6 @@
 {
   "title": "Channel 配置",
   "pages": [
-    "index",
     "feishu",
     "wechat"
   ]
