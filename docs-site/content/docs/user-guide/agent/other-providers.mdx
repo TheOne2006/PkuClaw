@@ -1,0 +1,31 @@
+---
+title: 其他 Provider
+description: 未列出的自定义 Agent provider 预留说明。
+---
+
+当前 PkuClaw 的稳定 Agent provider 是 Codex。
+
+Claude Code、Gemini CLI、OpenAI API 已经各自有预留页面。其他未知 provider 统一放在这里说明。
+
+## 当前状态
+
+| 项目 | 状态 |
+| --- | --- |
+| Codex provider | 已实现 |
+| Claude Code provider | 未实现 |
+| Gemini CLI provider | 未实现 |
+| OpenAI API provider | 未实现 |
+| 其他 provider 配置 schema | 未定义 |
+| 其他 provider runtime 执行器 | 未实现 |
+
+## 未来新增 provider 时应该补什么
+
+新增一个自定义 provider 后，至少需要补齐：
+
+1. `configs/config.toml` 中的启动配置；
+2. `configs/runtime/runtime.json` 中的 runtime 覆盖字段；
+3. provider 所需的凭据、环境变量和安全边界；
+4. realtime 与 loop 的行为差异；
+5. 最小验证命令。
+
+在实现前，请继续使用 [Codex](/docs/user-guide/agent/codex)。

@@ -3,10 +3,13 @@
   "pages": [
     "index",
     "architecture",
-    "runtime",
+    "request-lifecycle",
+    "runtime-files",
+    "agent-runtime",
+    "channels-and-outbox",
+    "loops-and-notifications",
     "skills",
-    "development",
-    "config-files",
-    "contributing"
+    "extension-points",
+    "development"
   ]
 }

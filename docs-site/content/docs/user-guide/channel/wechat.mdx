@@ -1,0 +1,30 @@
+---
+title: 微信
+description: 微信 channel 的预留配置页。
+---
+
+微信 channel 当前还没有实现。
+
+这一页先作为未来配置入口保留，避免后续新增微信时再重排使用指南结构。
+
+## 当前状态
+
+| 项目 | 状态 |
+| --- | --- |
+| 微信消息接入 | 未实现 |
+| 微信后台通知 | 未实现 |
+| 微信 Quick Action 映射 | 未实现 |
+| 配置文件 section | 未定义 |
+
+## 未来可能需要的配置
+
+真正实现微信 channel 后，预计也会分成两层：
+
+1. `configs/config.toml`：微信应用、回调、secret、token 等启动配置；
+2. `configs/runtime/runtime.json`：后台 loop 默认通知目标。
+
+在实现前，不要在本地配置里随意新增微信字段并假设 daemon 会读取。
+
+## 当前应该怎么做
+
+如果你现在需要可用 channel，请先使用 [飞书](/docs/user-guide/channel/feishu)。

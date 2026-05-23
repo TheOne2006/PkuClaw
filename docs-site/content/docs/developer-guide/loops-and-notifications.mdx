@@ -1,0 +1,156 @@
+---
+title: Loop 与通知策略
+description: 理解 LoopManager、runtime loop spec、通知策略和目标解析。
+---
+
+PkuClaw 的 loop 是后台周期任务。它适合做课程通知、作业 DDL、成绩变化等低噪声检查。
+
+核心原则：
+
+> loop 默认静默；只有通知策略要求时，才通过 channel outbox 通知用户。
+
+## LoopManager 做什么
+
+`LoopManager` 是调度器，不是业务逻辑层。
+
+它负责：
+
+- 热读取 `runtime.json`；
+- 找出 enabled loop；
+- 根据 `interval_seconds` 判断是否到期；
+- 防止同一个 loop 重叠运行；
+- 调用 `CoreRuntime.create_loop_run()`；
+- 用 `SilentSink` 执行后台 Agent run。
+
+代码：
+
+```text
+pkuclaw/core/loops.py
+```
+
+## LoopManager 不做什么
+
+`LoopManager` 不应该：
+
+- 解析教学网数据；
+- 判断 DDL 是否重要；
+- 直接发送飞书消息；
+- 拼 prompt；
+- 持有业务状态。
+
+课程业务逻辑应该写在 skill、Agent 任务流程或后续专门的数据处理层里。调度器只负责“何时触发”。
+
+## Runtime loop spec
+
+loop 来自：
+
+```text
+configs/runtime/runtime.json
+```
+
+一条 loop spec 的核心字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `id` | loop id |
+| `enabled` | 是否启用 |
+| `interval_seconds` | 调度间隔 |
+| `prompt` | 交给 Agent 的后台 task |
+| `suggested_skills` | 建议优先读取的 skill |
+| `sink_mode` | 通常是 `silent` |
+| `default_channel` | 可选 loop 级通知 channel |
+| `default_target_type` | 可选 loop 级目标类型 |
+| `default_target_id` | 可选 loop 级目标 id |
+| `prevent_overlap` | 是否避免同 loop 重叠运行 |
+| `max_concurrent_runs` | 单 loop 并发上限 |
+
+`CoreRuntime.create_loop_run()` 会把 loop spec 转成：
+
+```text
+AgentRunRequest(
+  source="loop",
+  conversation_id="daemon:loop:<loop_id>",
+  text=<loop.prompt>,
+  suggested_skills=<loop.suggested_skills + outbox skill>,
+  sink_mode=<loop.sink_mode>,
+  channel_context={loop_id, notify_policy, scheduled_at, target...}
+)
+```
+
+## 通知策略
+
+通知策略来自：
+
+```text
+runtime.notifications.policy
+```
+
+当前支持：
+
+| policy | 语义 |
+| --- | --- |
+| `important_only` | 只在重要变化或需要用户处理时通知 |
+| `always` | 每次 loop 完成都发送低噪声摘要 |
+| `silent` | 完全静默，不主动 outbox |
+| `on_error` | 只在登录失效、工具失败等需要用户处理的异常时通知 |
+| `digest` | 汇总通知，普通变化先积累，紧急事项或明确要求时发送 |
+
+策略说明由 `describe_notify_policy()` 渲染到 loop prompt。Agent 应以 prompt 中的 Notification Policy 为最高优先级，而不是自己发明通知标准。
+
+代码：
+
+```text
+pkuclaw/runtime/config.py
+pkuclaw/agents/wrapper.py
+```
+
+## 什么是“重要变化”
+
+默认 `important_only` 策略下，重要变化通常包括：
+
+- 新增或变更 DDL；
+- 未提交作业进入 72 小时 / 24 小时提醒窗口；
+- 逾期或失败风险；
+- 成绩或反馈变化；
+- 重要公告；
+- 登录失效；
+- 工具缺失；
+- 网络、解析或抓取连续失败。
+
+课件目录或课程内容普通变化默认不作为通知项，避免噪声过高。
+
+## outbox target 解析顺序
+
+loop 通知最终由 daemon 解析目标：
+
+```text
+CoreRuntime.resolve_outbox_target(run_id, loop_id)
+```
+
+顺序是：
+
+1. **原始 run channel target**：如果 run 来自用户对话，优先回到原对话；
+2. **loop 级默认目标**：`loop.default_channel/default_target_type/default_target_id`；
+3. **全局默认目标**：`notifications.default_channel/default_target_type/default_target_id`。
+
+如果没有任何目标，outbox job 会失败并写入 failed / ack，而不是默默丢掉。
+
+## Realtime 为什么不同
+
+realtime 的用户就在当前对话里，所以默认输出是 streaming reply。它不应该为了普通文本再调用 outbox text，否则用户会收到重复通知。
+
+只有当 realtime 本轮需要交付生成的图片或文件时，才可以按 channel outbox 规则发送 image/file。
+
+## 调试 loop
+
+常见排查顺序：
+
+1. 检查 `runtime.json` 是否存在且 schema version 支持；
+2. 检查目标 loop 是否 `enabled = true`；
+3. 检查 `interval_seconds` 和 `prevent_overlap`；
+4. 检查 `data/agent_runs/<provider>/<run_id>/prompt.md`；
+5. 检查 provider stdout/stderr/result；
+6. 如果通知未到达，检查 `data/notify_queue/acks`、`done`、`failed`；
+7. 检查通知目标是否能被 `CoreRuntime.resolve_outbox_target()` 解析。
+
+继续阅读 [Skill Catalog](/docs/developer-guide/skills)，理解 loop 如何获得任务能力。

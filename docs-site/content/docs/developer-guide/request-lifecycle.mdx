@@ -1,0 +1,143 @@
+---
+title: 请求生命周期
+description: 跟踪 realtime 用户消息、quick action 和 loop 后台任务如何进入 Agent。
+---
+
+PkuClaw 只有两类 Agent run：
+
+| source | 由谁触发 | 面向谁输出 | 默认 sink |
+| --- | --- | --- | --- |
+| `realtime` | 用户消息或 quick action | 当前对话中的用户 | streaming |
+| `loop` | `LoopManager` 定时 tick | 后台任务；必要时通过 outbox 通知用户 | silent |
+
+quick action 不是第三类 run。它只是把菜单或按钮事件映射成一段预配置 task，然后继续创建 `source = "realtime"` 的 run。
+
+## Realtime 用户消息
+
+普通用户消息的链路是：
+
+```text
+Feishu event
+-> Channel Adapter
+-> ChannelInboundMessage
+-> CoreRuntime.ingest_channel_message()
+-> CoreRuntime.create_realtime_run()
+-> AgentWrapper.prepare()
+-> CoreDispatch
+-> channel gateway 提交后台执行
+-> AgentWrapper.run()
+-> CodexAgent
+-> AgentEventSink
+-> channel reply
+```
+
+关键对象：
+
+| 对象 | 作用 | 代码 |
+| --- | --- | --- |
+| `ChannelInboundMessage` | channel adapter 产出的归一化入站消息 | `pkuclaw/channels/base.py` |
+| `ChannelTarget` | 回复或后续 outbox 可使用的 channel-neutral 目标 | `pkuclaw/channels/base.py` |
+| `CoreDispatch` | `CoreRuntime` 返回给 channel gateway 的调度结果 | `pkuclaw/core/models.py` |
+| `AgentRunRequest` | 交给 `AgentWrapper` 的标准 Agent 请求 | `pkuclaw/core/models.py` |
+
+普通 realtime run 的 `TaskPlan` 不预选 skill：
+
+```text
+suggested_skills = ()
+ack = "收到，我交给 Code Agent 处理。"
+```
+
+是否读取某个 skill，由 Agent 根据 prompt 中的 Skill Catalog 和用户任务自行判断。
+
+## Quick action
+
+quick action 适合把常用任务绑定成飞书菜单、按钮或其他 channel action。链路是：
+
+```text
+飞书菜单 key
+-> channel adapter 解析 raw action
+-> events.json channel_mappings
+-> runtime event id
+-> CoreRuntime.create_realtime_event_run()
+-> RuntimeEventSpec.task
+-> CoreRuntime.create_realtime_run()
+-> source = realtime
+```
+
+对应 runtime 文件：
+
+```text
+configs/runtime/events.json
+```
+
+`events.json` 里的一条 event 通常包含：
+
+| 字段 | 作用 |
+| --- | --- |
+| `id` | PkuClaw 内部 event id |
+| `title` / `description` | 给 channel UI 展示或给维护者阅读 |
+| `task` | 触发后真正交给 Agent 的用户任务 |
+| `suggested_skills` | 本次 run 建议优先阅读的 skill |
+| `ack` | channel 收到点击后的短提示 |
+| `enabled` | 是否启用 |
+
+`CoreRuntime.create_realtime_event_run()` 会把 `event.task` 填进新的 `ChannelInboundMessage.text`，并把 `event.id`、`event.title` 写入 metadata，之后继续走 realtime 链路。
+
+## Loop 后台任务
+
+loop 后台任务的链路是：
+
+```text
+LoopManager.run_due_once()
+-> RuntimeConfigStore.read_snapshot()
+-> runtime.json loops[]
+-> LoopManager._submit_loop()
+-> CoreRuntime.create_loop_run()
+-> source = loop
+-> AgentWrapper.prepare()
+-> LoopManager worker thread
+-> CoreRuntime.run_agent()
+-> AgentWrapper.run()
+-> CodexAgent
+-> SilentSink
+-> 必要时调用 scripts/pkuclaw_outbox.py
+```
+
+loop 的 task 来自 `runtime.json` 中对应 loop 的 `prompt` 字段。如果没有填写，代码会使用一个保守 fallback：
+
+```text
+Run this configured periodic loop. Stay silent unless important.
+```
+
+loop run 会自动追加 channel outbox skill：
+
+```text
+tools/channel-outbox.md
+```
+
+因此 loop prompt 会告诉 Agent：如果通知策略判定需要通知用户，只能通过 outbox 脚本发送，不要直接调用飞书 API。
+
+## CoreRuntime 不做什么
+
+`CoreRuntime` 是控制面，不是智能体本身。它故意不做这些事：
+
+- 不做自然语言意图分类；
+- 不根据用户文本猜测 quick action；
+- 不把 prompt 文案硬编码在 core 层；
+- 不直接执行课程业务逻辑；
+- 不把飞书原始事件结构暴露给 Agent。
+
+这种边界让 realtime、quick action 和 loop 的入口差异停留在调度层，下游 Agent 只看到清晰的 `source`、task、runtime config、skill catalog 和 channel context。
+
+## 什么时候看哪段代码
+
+| 你要改什么 | 先看哪里 |
+| --- | --- |
+| 用户消息如何进入 runtime | `pkuclaw/channels/feishu/handlers.py`、`pkuclaw/core/runtime.py` |
+| 菜单 action 如何映射 task | `pkuclaw/runtime/events.py`、`configs/runtime/events.json` |
+| loop 如何被调度 | `pkuclaw/core/loops.py` |
+| run record 和 prompt 如何生成 | `pkuclaw/agents/wrapper.py` |
+| Codex CLI 如何被调用 | `pkuclaw/agents/providers/codex.py` |
+| 后台通知如何发出 | `scripts/pkuclaw_outbox.py`、`pkuclaw/notify_queue/worker.py` |
+
+继续阅读 [Runtime 配置系统](/docs/developer-guide/runtime-files)，理解这些行为为什么主要由文件配置驱动。

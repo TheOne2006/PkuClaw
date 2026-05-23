@@ -1,0 +1,158 @@
+---
+title: Channel 与 Outbox
+description: 理解平台适配、channel backend、outbox 脚本和 notify queue worker。
+---
+
+PkuClaw 把 channel 分成两条边界：
+
+- **Channel Adapter**：平台事件进入 PkuClaw；
+- **Channel Backend**：PkuClaw 输出回到平台。
+
+Agent 不是 channel backend。Agent 不应该直接调用飞书 API、拼卡片、猜 open id 或持有 app secret。
+
+## Channel Adapter
+
+Channel Adapter 负责接收平台事件，并把它们转换成 `ChannelInboundMessage`。
+
+```text
+平台原始事件
+-> Channel Adapter
+-> ChannelInboundMessage
+-> CoreRuntime.ingest_channel_message()
+```
+
+`ChannelInboundMessage` 包含：
+
+| 字段 | 说明 |
+| --- | --- |
+| `channel` | channel 名称，例如 `feishu` |
+| `conversation_id` | PkuClaw 内部 conversation id |
+| `text` | 交给 Agent 的文本 task |
+| `sender_id` | 可选发送者标识 |
+| `target` | 可选 `ChannelTarget`，用于回复或 outbox 目标解析 |
+| `event_id` | quick action event id |
+| `external_message_id` | 平台原始消息 id |
+| `raw` | 原始事件，通常只供 adapter/debug 使用 |
+| `metadata` | 额外上下文 |
+
+代码：
+
+```text
+pkuclaw/channels/base.py
+pkuclaw/channels/feishu/*
+```
+
+## Channel Backend
+
+Channel Backend 负责把 PkuClaw 的 channel-neutral 输出投递到平台。
+
+协议定义在：
+
+```text
+pkuclaw/channels/base.py
+```
+
+核心方法：
+
+```text
+send_text()
+send_card()
+send_image()
+send_file()
+update_card()
+```
+
+`CoreRuntime` 通过 `register_channel_backend()` 注册 backend，通过 `send_channel_*()` 调用 backend。这样 core 层只知道 channel-neutral 的 `ChannelTarget`，不需要知道飞书 SDK 细节。
+
+## 为什么需要 Outbox
+
+后台 loop 有一个特殊问题：Agent 运行在 provider 进程中，但真正投递消息应该由 daemon 负责。原因是：
+
+- daemon 持有 channel backend；
+- daemon 能统一解析通知目标；
+- daemon 可以处理卡片、图片、文件上传等平台细节；
+- Agent prompt 不应该暴露真实 target id、token 或 SDK 细节；
+- outbox 文件队列可审计、可重试、可定位失败。
+
+因此 Agent 只看到一个 thin client：
+
+```bash
+python scripts/pkuclaw_outbox.py text --text "..." --title "optional"
+python scripts/pkuclaw_outbox.py image --path image.png --caption "optional"
+python scripts/pkuclaw_outbox.py file --path result.pdf --caption "optional"
+```
+
+## Outbox 运行链路
+
+```text
+Agent
+-> scripts/pkuclaw_outbox.py
+-> data/notify_queue/pending/<job_id>.json
+-> NotifyQueueWorker.process_pending()
+-> CoreRuntime.resolve_outbox_target()
+-> CoreRuntime.send_channel_text/image/file()
+-> Channel Backend
+-> Feishu 等平台
+```
+
+处理结果会写入：
+
+```text
+data/notify_queue/acks/<job_id>.json
+data/notify_queue/done/<job_id>.json
+data/notify_queue/failed/<job_id>.json
+```
+
+脚本默认会等待 ack；如果超时，会返回失败，但 pending job 可能仍然被 daemon 后续处理。
+
+## Outbox job
+
+outbox 脚本写入的是 JSON job。核心字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `schema_version` | 当前为 2 |
+| `job_id` | 本次 outbox job id |
+| `kind` | `text` / `image` / `file` |
+| `created_at` | 创建时间 |
+| `payload` | text/title 或 path/caption |
+| `run_id` | 可选，用于回查原始 channel target |
+| `run_source` | 可选，通常是 realtime 或 loop |
+| `loop_id` | 可选，用于 loop target fallback |
+
+`CodexAgent` 会通过环境变量把 run context 暴露给 outbox 脚本：
+
+```text
+PKUCLAW_OUTBOX_QUEUE_DIR
+PKUCLAW_RUN_ID
+PKUCLAW_RUN_SOURCE
+PKUCLAW_LOOP_ID
+```
+
+## 目标解析
+
+`NotifyQueueWorker` 不自己猜 target，而是调用：
+
+```text
+CoreRuntime.resolve_outbox_target(run_id=..., loop_id=...)
+```
+
+解析顺序：
+
+1. run metadata 中原始 `ChannelTarget`；
+2. 指定 loop 的 `default_channel/default_target_type/default_target_id`；
+3. 全局 `notifications.default_channel/default_target_type/default_target_id`。
+
+如果三者都没有，outbox job 应明确失败，而不是静默丢失或让 Agent 猜收件人。
+
+## Realtime 和 Loop 的输出边界
+
+| 场景 | 默认输出 |
+| --- | --- |
+| 普通 realtime | 通过 streaming sink 回复当前对话 |
+| realtime 生成图片/文件 | 可以在需要交付时使用 outbox image/file |
+| realtime 普通文本 | 不发送 outbox text，避免重复通知 |
+| loop 无重要变化 | 静默，只写日志/artifacts |
+| loop 有重要变化或需用户处理 | 使用 outbox text/image/file |
+
+继续阅读 [Loop 与通知策略](/docs/developer-guide/loops-and-notifications)，理解 loop 什么时候应该通知。

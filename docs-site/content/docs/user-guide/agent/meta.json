@@ -1,0 +1,11 @@
+{
+  "title": "Agent 配置",
+  "pages": [
+    "index",
+    "codex",
+    "claude-code",
+    "gemini-cli",
+    "openai-api",
+    "other-providers"
+  ]
+}

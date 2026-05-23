@@ -1,23 +1,47 @@
 ---
-title: 开发工作流
-description: PkuClaw 代码归属、prompt/runtime 变更和测试检查。
+title: 开发与贡献工作流
+description: PkuClaw 代码目录归属、边界约束、文档同步和验证命令。
 ---
 
-本页面向准备修改 PkuClaw 代码或 runtime 文件的开发者。
+本页面向准备修改 PkuClaw 代码、runtime 文件、prompt、skill、channel 或文档的开发者。目标是让改动保持小而聚焦，并避免破坏 runtime 的核心边界。
 
 ## 代码归属
 
 ```text
 pkuclaw/
-  core/         # run orchestration、LoopManager、Store、共享模型
-  runtime/      # runtime 文件 loader：config/events/prompts/skills
-  agents/       # AgentWrapper、Codex provider、sink、artifact
-  channels/     # 平台 adapter：事件转换、流式展示、卡片详情
-  notify_queue/ # daemon 文件通知队列 worker
-scripts/        # outbox 脚本 thin clients
+  core/          # CoreRuntime、LoopManager、Store、共享模型
+  runtime/       # runtime 文件 loader：config/events/prompts/skills
+  agents/        # AgentWrapper、provider、sink、artifact
+  channels/      # 平台 adapter/backend：Feishu 等
+  notify_queue/  # daemon 文件通知队列 worker
+scripts/         # Agent 可调用的 thin client，例如 pkuclaw_outbox.py
 ```
 
-不要新增顶层 `runtime_*.py`、`code_agents/` 或业务 connector 包。新逻辑应放入对应层。
+不要新增顶层 `runtime_*.py`、`code_agents/` 或临时业务 connector 包。新逻辑应放入对应层。
+
+## 修改前先判断属于哪一层
+
+| 你要改的东西 | 首选位置 |
+| --- | --- |
+| run 编排、入口归一化、通知目标解析 | `pkuclaw/core/` |
+| runtime config/events/prompts/skills loader | `pkuclaw/runtime/` |
+| prompt 构建、provider 执行、artifacts | `pkuclaw/agents/` |
+| 飞书或其他平台接入 | `pkuclaw/channels/` |
+| outbox job 扫描和投递 | `pkuclaw/notify_queue/` |
+| Agent 可调用的本地脚本 | `scripts/` |
+| quick action / loop / prompt / skill 行为配置 | `configs/runtime/` |
+| 使用者或开发者文档 | `docs-site/content/docs/` |
+
+## 不要破坏的边界
+
+- 不新增第三类 run source；优先归入 `realtime` 或 `loop`。
+- 不让 Agent 直接调用飞书 API 或解析真实 target id。
+- 不把完整 skill markdown 默认注入 prompt。
+- 不把平台原始事件结构泄漏到 core 或 Agent prompt。
+- 不提交 `configs/config.toml`、`configs/runtime/runtime.json`、`data/`、token、cookie、open id、chat id。
+- loop 默认静默；只有通知策略要求时才走 outbox。
+- prompt 文案优先改 `configs/runtime/prompts.json`，不要硬编码进 `AgentWrapper`。
+- runtime 文件格式变化要同步更新模板、文档和测试。
 
 ## Prompt 修改
 
@@ -39,7 +63,7 @@ configs/runtime/prompts.json
 
 ## Runtime 修改
 
-Runtime 文件是普通可编辑文件：
+Runtime 文件是普通可编辑文件，也是 daemon 的 hot reload surface：
 
 ```text
 configs/runtime/runtime.example.json
@@ -50,9 +74,7 @@ configs/runtime/skills.json
 configs/runtime/skills/**
 ```
 
-`runtime.example.json` 是可提交模板；本地复制为 `runtime.json` 后再填写 loop
-通知目标。不要提交真实 `runtime.json`，它可能包含 `open_id`/`chat_id` 等本地
-channel 目标。
+`runtime.example.json` 是可提交模板；本地复制为 `runtime.json` 后再填写 loop 通知目标。不要提交真实 `runtime.json`，它可能包含 `open_id`、`chat_id` 等本地 channel 目标。
 
 修改时建议保持：
 
@@ -61,15 +83,46 @@ channel 目标。
 - 真实通知目标、凭据和隐私数据不要进入示例或文档；
 - loop 行为默认静默，重要变化才通知。
 
+## Channel / Outbox 修改
+
+修改 channel 时注意：
+
+- adapter 负责平台事件进入；
+- backend 负责平台消息发出；
+- core 只接触 `ChannelInboundMessage`、`ChannelTarget`、`ChannelOutboundResult`；
+- Agent 只通过 `scripts/pkuclaw_outbox.py` 写入本地队列；
+- `NotifyQueueWorker` 负责读取队列并调用 `CoreRuntime.send_channel_*()`。
+
+如果新增 outbox job kind，必须同步修改：
+
+```text
+scripts/pkuclaw_outbox.py
+pkuclaw/notify_queue/worker.py
+configs/runtime/skills/tools/channel-outbox.md
+docs-site/content/docs/developer-guide/channels-and-outbox.mdx
+```
+
 ## 文档维护地图
 
 文档以 `docs-site` 为主，根 README 只保留快速入口：
 
 - 根目录 `README.md`：项目简介、快速安装和文档入口；
-- `docs-site/content/docs/user-guide**`：使用者安装、配置和日常运行文档；
-- `docs-site/content/docs/developer-guide**`：架构、runtime、skill、开发流程和参考文档；
+- `docs-site/content/docs/user-guide/**`：使用者快速开始、配置、channel、agent、skill、登录和 quick action；
+- `docs-site/content/docs/developer-guide/**`：架构、请求生命周期、runtime 配置、agent、channel/outbox、loop、skill 和扩展开发；
 - `ARCHITECTURE.md`：仓库级架构说明；如果内容继续扩展，优先同步或迁移到文档站；
 - `configs/runtime/skills/**`：runtime skill 正文的 source of truth，文档站只解释目录、边界和索引。
+
+## PR / Review 重点
+
+Review 时优先看这些问题：
+
+- 是否把用户入口、quick action、loop 的 source 边界讲清楚？
+- 是否把 channel/platform 细节泄漏到了 core 或 prompt？
+- 是否让 Agent 直接接触敏感凭据或目标 ID？
+- 是否破坏了 realtime 和 loop 的输出边界？
+- 是否让 loop 变成高噪声通知？
+- 是否把本地配置、data、日志或运行产物提交了？
+- 行为变更是否同步更新了使用指南和开发者指南？
 
 ## 测试命令
 
@@ -86,9 +139,13 @@ npm ci
 npm run build
 ```
 
-## 开发 workflow
+如果环境、凭据、网络或平台限制导致无法运行验证，最终说明和 PR 描述里必须明确写出未运行的原因。
+
+## 建议开发 workflow
 
 1. **明确边界**：判断修改属于 core、runtime、agents、channels 还是 scripts。
-2. **小步提交**：先改最小闭环，避免同时重构多个层。
-3. **本地验证**：运行 Python 检查；文档改动运行 Next.js/Fumadocs build。
-4. **更新文档**：行为变更同步更新 Fumadocs 文档；runtime 文件格式变化同步更新配置参考、Runtime 设计和 Skill Catalog 页面。
+2. **读相关文档与测试**：runtime prompt、通知策略、channel outbox、loop/realtime 行为尤其需要先看文档。
+3. **小步实现**：先改最小闭环，避免同时重构多个层。
+4. **本地验证**：运行 Python 检查；文档改动运行 docs-site build。
+5. **同步文档**：行为变更同步更新 Fumadocs 文档；runtime 文件格式变化同步更新使用指南和开发者指南。
+6. **说明风险和回滚**：PR 或最终说明里写清楚改了什么、为什么改、验证了什么、如何回滚。

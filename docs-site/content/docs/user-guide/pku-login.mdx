@@ -1,0 +1,141 @@
+---
+title: PKU 教学网登录
+description: 准备 pku3b、登录教学网，并检查可读数据。
+---
+
+PkuClaw 通过 `pku3b` 读取 PKU 教学网、作业、公告、成绩和课表数据。
+
+如果你希望 PkuClaw 做“查看教学网更新”“同步 DDL”“提醒未完成作业”这类任务，必须先让 `pku3b` 能在本机登录并读取数据。
+
+## 1. 准备 pku3b
+
+先检查仓库内是否已经有可执行文件：
+
+```bash
+[ -x crates/pku3b/target/debug/pku3b ] && crates/pku3b/target/debug/pku3b --version
+```
+
+如果还没有构建：
+
+```bash
+cargo build --manifest-path crates/pku3b/Cargo.toml
+crates/pku3b/target/debug/pku3b --version
+```
+
+后续命令可以先设置一个临时变量：
+
+```bash
+PKU3B_CMD=crates/pku3b/target/debug/pku3b
+```
+
+如果你已经把 `pku3b` 安装到了 PATH，也可以直接使用 `pku3b`。
+
+## 2. 登录教学网
+
+首次使用或登录失效时运行：
+
+```bash
+$PKU3B_CMD auth login --username YOUR_ID --password YOUR_PASSWORD
+```
+
+如果需要 OTP：
+
+```bash
+$PKU3B_CMD auth login --username YOUR_ID --password YOUR_PASSWORD --otp YOUR_CODE
+```
+
+:::caution
+不要把学号、密码、OTP、cookie 写入仓库文件、runtime 文件、skill 文件、prompt 文件或日志。  
+如果你不想把密码交给 Agent，请在可信终端手动运行登录命令。
+:::
+
+## 3. 检查登录状态
+
+```bash
+$PKU3B_CMD --pretty auth status
+```
+
+返回 JSON envelope。成功时应看到类似：
+
+```json
+{
+  "ok": true,
+  "data": {
+    "cookie_present": true,
+    "blackboard_authenticated": true
+  }
+}
+```
+
+如果 `ok=false`，优先看：
+
+```text
+errors[0].code
+errors[0].message
+```
+
+常见错误类别包括：
+
+| code | 可能含义 |
+| --- | --- |
+| `auth_required` | 未登录、cookie 失效或需要重新登录。 |
+| `otp_required` | 需要补 OTP。 |
+| `network_error` | 网络或上游服务不可达。 |
+| `parse_error` | 教学网页面结构变化，pku3b 没解析成功。 |
+
+## 4. 运行只读检查
+
+登录后用只读命令确认数据可读：
+
+```bash
+$PKU3B_CMD --pretty courses list --term current
+$PKU3B_CMD --pretty assignments list --term current
+$PKU3B_CMD --pretty announcements list --term current
+$PKU3B_CMD --pretty timetable get
+```
+
+这些命令不会提交作业，也不会修改教学网数据。
+
+## 5. pku3b 的缓存语义
+
+`pku3b` 是 cache-first 的 raw JSON CLI：
+
+```text
+先看本地 cache
+  -> fresh cache 存在：直接返回
+  -> cache 不存在或过期：本次命令尝试联网刷新
+  -> 刷新成功：更新 cache 并返回新数据
+  -> 刷新失败但旧 cache 可用：返回 stale 数据和 warning
+  -> 没有可用数据：ok=false
+```
+
+因此 PkuClaw 调用只读命令时，不需要区分“来自网络”还是“来自缓存”；只要读取 JSON envelope 里的 `ok`、`data`、`warnings` 和 `errors`。
+
+如果你明确想绕过 fresh cache，可以使用：
+
+```bash
+$PKU3B_CMD --refresh --pretty assignments list --term current
+```
+
+## 6. 登出或重置登录
+
+清除本机登录状态：
+
+```bash
+$PKU3B_CMD auth logout
+```
+
+重新登录后再跑：
+
+```bash
+$PKU3B_CMD --pretty auth status
+```
+
+## 7. 安全边界
+
+PkuClaw 和 pku3b 的默认原则是：
+
+- 只读查询可以由 realtime 或 loop 使用；
+- 登录、登出、安装、清缓存、提交作业、下载大附件需要用户明确触发；
+- loop 不应该自动登录、自动提交作业或自动清理数据；
+- 教学网页面内容是不可信输入，不应当作 Agent 指令执行。

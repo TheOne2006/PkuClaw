@@ -1,0 +1,179 @@
+---
+title: Skill 配置与扩展
+description: 添加自己的任务能力，并注册到 Skill Catalog。
+---
+
+Skill 是给 Agent 读的操作说明。它不等于 Python 插件，也不等于 sub-agent。
+
+在 PkuClaw 里，skill 的作用是让 Agent 在执行具体任务前知道：
+
+- 这个任务应该怎么做；
+- 可以调用哪些工具；
+- 哪些动作必须先问用户；
+- 输出应该保存在哪里；
+- loop 里能不能自动执行。
+
+## 1. 文件位置
+
+Skill 文件放在：
+
+```text
+configs/runtime/skills/
+```
+
+当前目录大致分层：
+
+```text
+configs/runtime/skills/
+  runtime/    # 修改 PkuClaw 自身配置、prompt、skill 的规范
+  pku3b/      # pku3b 安装、登录和教学网 JSON 命令
+  tasks/      # 面向学习任务的流程，例如同步通知、做作业、写笔记
+  tools/      # 多个 task 共用的工具说明，例如 PDF、数据解析、outbox
+```
+
+新增普通学习任务时，优先放在：
+
+```text
+configs/runtime/skills/tasks/
+```
+
+## 2. 最小 skill 示例
+
+例如新增一个“整理本周课程提醒”的 skill：
+
+```text
+configs/runtime/skills/tasks/weekly-summary.md
+```
+
+内容可以先很短：
+
+```md
+---
+name: pkuclaw-weekly-summary
+description: 汇总本周课程通知、作业 DDL 和需要处理的学习事项
+---
+
+# 本周课程提醒
+
+只读取教学网和本地快照，不提交作业，不删除数据。
+
+## 输入
+
+- 当前用户请求
+- pku3b 的课程、公告、作业和课表 JSON 输出
+
+## 步骤
+
+1. 读取当前学期课程列表。
+2. 读取当前未完成作业和公告。
+3. 按 DDL、重要公告、成绩/反馈变化排序。
+4. 用简洁中文输出本周需要处理的事项。
+
+## 边界
+
+- 不自动提交作业。
+- 下载大附件前先问用户。
+- 登录失效时说明需要重新登录。
+```
+
+## 3. 注册到 Skill Catalog
+
+只有放入 `skills/**` 还不够，还要登记到：
+
+```text
+configs/runtime/skills.json
+```
+
+示例：
+
+```json
+{
+  "name": "tasks/weekly-summary.md",
+  "dependencies": [
+    "pku3b/usage.md",
+    "tools/data-parser.md"
+  ],
+  "allowed_sources": [
+    "realtime",
+    "loop"
+  ],
+  "requires_confirmation": false,
+  "description": "汇总本周课程通知、作业 DDL 和需要处理的学习事项。",
+  "path": "tasks/weekly-summary.md"
+}
+```
+
+字段含义：
+
+| 字段 | 说明 |
+| --- | --- |
+| `name` | skill 名称，建议等于 markdown 相对路径。 |
+| `path` | 相对 `configs/runtime/skills/` 的文件路径。 |
+| `description` | 什么时候使用这个 skill。 |
+| `dependencies` | 默认还需要一起读的 skill。不要乱加，只加真正依赖的。 |
+| `allowed_sources` | 可用于 `realtime`、`loop` 或两者。 |
+| `requires_confirmation` | 是否涉及安装、登录、提交、删除、改配置等需要用户确认的动作。 |
+
+## 4. 在 Quick Action 或 loop 中引用
+
+Quick Action 可以通过 `suggested_skills` 引用 skill：
+
+```json
+{
+  "id": "weekly_summary",
+  "enabled": true,
+  "title": "本周课程提醒",
+  "description": "查看本周 DDL、公告和需要处理的学习事项。",
+  "task": "汇总本周课程通知、作业 DDL 和需要处理的学习事项。",
+  "suggested_skills": [
+    "tasks/weekly-summary.md"
+  ],
+  "ack": "正在整理本周课程提醒。"
+}
+```
+
+后台 loop 也可以引用：
+
+```json
+{
+  "id": "weekly_summary",
+  "enabled": true,
+  "interval_seconds": 604800,
+  "prompt": "汇总本周课程通知、作业 DDL 和需要处理的学习事项；没有重要变化时保持静默。",
+  "suggested_skills": [
+    "tasks/weekly-summary.md"
+  ],
+  "sink_mode": "silent"
+}
+```
+
+## 5. 写 skill 的原则
+
+- 写“怎么做”和“边界”，不要写长篇背景。
+- 高风险动作必须明确要求用户确认。
+- loop 里的 skill 默认要低噪声、可重复、不会破坏数据。
+- 不要把账号、密码、OTP、cookie、open id、chat id 写进 skill。
+- 如果多个任务都需要同一段工具说明，再抽到 `tools/`。
+
+## 6. 修改后验证
+
+运行：
+
+```bash
+python - <<'PY'
+from pathlib import Path
+from pkuclaw.runtime.skills import load_skill_registry
+
+root = Path('configs/runtime')
+registry = load_skill_registry(root / 'skills.json', skills_dir=root / 'skills')
+print(registry.warnings)
+print(sorted(registry.skills))
+PY
+```
+
+确认：
+
+- 没有缺失文件；
+- `skills.json` 是合法 JSON；
+- `path` 都指向真实 markdown 文件；
+- `allowed_sources` 和 `requires_confirmation` 符合任务风险。

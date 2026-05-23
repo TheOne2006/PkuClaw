@@ -1,18 +1,38 @@
 ---
 title: 快速开始
-description: 在本地准备 PkuClaw，并跑起开发入口。
+description: 让 Agent 代装，或手动完成 PkuClaw 的最短启动路径。
 ---
 
-本页给出一条最短路径：拉取仓库、安装依赖、复制配置、运行基础检查，然后启动开发入口。
+本页只做一件事：**尽快把 PkuClaw 在本机跑起来**。
 
-## 1. 克隆仓库
+如果你想先理解每个配置项，跳到 [配置总览](/docs/user-guide/configuration)。如果你只想先启动，按本页走。
+
+## 方式 A：让本地 Agent 帮你安装
+
+如果你已经在本机使用 Codex、Claude Code 或类似本地 Agent，可以把下面这句话直接发给它：
+
+```text
+请阅读并执行本仓库 docs-site/content/docs/user-guide/agent-install.mdx 的步骤，在当前机器安装并启动 PkuClaw。只改本地配置文件，不提交凭据、cookie、data、notify_queue 或构建产物；遇到需要账号、密码、OTP、飞书密钥或系统包安装的步骤先停下来问我。
+```
+
+配套的 Agent 操作手册在：
+
+```text
+docs-site/content/docs/user-guide/agent-install.mdx
+```
+
+它比本页更适合 Agent 执行：里面写了检查顺序、安全边界和验证命令。
+
+## 方式 B：手动快速开始
+
+### 1. 克隆仓库
 
 ```bash
 git clone https://github.com/TheOne2006/PkuClaw.git
 cd PkuClaw
 ```
 
-## 2. 准备 Python 环境
+### 2. 准备 Python 环境
 
 推荐使用 `uv`：
 
@@ -30,15 +50,21 @@ python -m pip install -e .
 pkuclaw --help
 ```
 
-## 3. 创建本地启动配置
+### 3. 创建本地配置
 
 ```bash
 cp configs/config.example.toml configs/config.toml
+cp configs/runtime/runtime.example.json configs/runtime/runtime.json
 ```
 
-然后编辑 `configs/config.toml`。本地真实配置不应提交，仓库 `.gitignore` 已忽略它。
+然后编辑这两个本地文件：
 
-## 4. 配置必要凭据
+- `configs/config.toml`：启动期配置，例如飞书 app、Codex CLI 路径、数据目录。
+- `configs/runtime/runtime.json`：runtime 配置，例如模型、loop、通知目标。
+
+这两个文件默认都不应该提交。
+
+### 4. 配置必要凭据
 
 如果要启用飞书渠道，需要设置飞书 app secret：
 
@@ -48,14 +74,16 @@ export FEISHU_APP_SECRET="你的飞书 app secret"
 
 `FEISHU_APP_ID`、`FEISHU_API_BASE` 也可以通过环境变量覆盖配置文件。
 
-## 5. 运行检查
+如果你暂时不用飞书，可以先跳过这一步，但飞书 realtime 和 daemon 启动时仍会需要有效配置。
+
+### 5. 运行基础检查
 
 ```bash
 python -m compileall pkuclaw scripts
 python -m unittest discover
 ```
 
-## 6. 启动入口
+### 6. 启动入口
 
 开发实时路径：
 
@@ -69,10 +97,16 @@ uv run pkuclaw realtime feishu
 uv run pkuclaw daemon
 ```
 
-完整 daemon 会启用渠道、`CoreRuntime`、后台 loop 和 outbox queue worker。实时 debug 入口只保留 realtime 路径，便于调试 UI 和消息流。
+两者区别：
+
+| 命令 | 用途 |
+| --- | --- |
+| `uv run pkuclaw realtime feishu` | 只跑飞书实时入口，适合先测试消息收发。 |
+| `uv run pkuclaw daemon` | 跑完整 daemon，包括飞书、后台 loop 和 outbox queue worker。 |
 
 ## 下一步
 
-- 阅读 [安装说明](/docs/user-guide/installation) 补齐工具依赖。
-- 阅读 [配置说明](/docs/user-guide/configuration) 理解启动期配置和 runtime 配置的边界。
-- 阅读 [Runtime 设计](/docs/developer-guide/runtime) 了解 realtime、loop、quick action 和 skill catalog。
+- [配置总览](/docs/user-guide/configuration)：分清每类配置文件的职责。
+- [Channel 配置](/docs/user-guide/channel)：让飞书消息和后台通知可用。
+- [Agent 配置](/docs/user-guide/agent)：调整 Codex 模型、权限和超时。
+- [PKU 教学网登录](/docs/user-guide/pku-login)：让 PkuClaw 能读取教学网数据。

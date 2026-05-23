@@ -1,0 +1,143 @@
+---
+title: Agent 安装手册
+description: 给本地 Agent 执行 PkuClaw 安装和启动时使用的操作清单。
+---
+
+本页是给本地 Agent 读的执行手册，不是普通用户的第一阅读入口。
+
+## 目标
+
+在当前机器上准备 PkuClaw 的最小可运行环境，并完成基础验证。
+
+## 只允许改动的范围
+
+可以创建或修改：
+
+- `configs/config.toml`
+- `configs/runtime/runtime.json`
+- 本地依赖目录和构建产物
+- `data/` 下的运行状态
+
+不要提交或写入可提交文件：
+
+- 飞书 secret、token、cookie；
+- PKU 账号、密码、OTP；
+- open id、chat id；
+- `data/`、`logs/`、`tmp/`、`notify_queue/`；
+- `docs-site/node_modules/`、`.next/`、`out/`；
+- `crates/*/target/`。
+
+遇到账号、密码、OTP、飞书 app secret、系统包安装、删除文件、提交作业、下载大附件等步骤，先停下来问用户。
+
+## 1. 确认仓库状态
+
+```bash
+git status --short --branch
+git branch --show-current
+```
+
+如果用户只要求本地安装，不要创建 commit，不要 push。
+
+## 2. 准备 Python 依赖
+
+优先使用 `uv`：
+
+```bash
+uv sync
+uv run pkuclaw --help
+```
+
+如果没有 `uv`，使用标准 editable install：
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -e .
+pkuclaw --help
+```
+
+## 3. 创建本地配置
+
+```bash
+cp -n configs/config.example.toml configs/config.toml
+cp -n configs/runtime/runtime.example.json configs/runtime/runtime.json
+```
+
+如果目标文件已经存在，先读取现有内容，不要覆盖。
+
+至少检查：
+
+- `configs/config.toml` 里的 `[feishu].app_id`
+- `FEISHU_APP_SECRET` 是否已设置
+- `[codex].bin` 是否能执行
+- `configs/runtime/runtime.json` 里的通知目标是否仍是 `null`
+
+## 4. 检查 Codex CLI
+
+```bash
+codex --help
+```
+
+如果失败，询问用户 Codex CLI 的实际路径，并把 `configs/config.toml` 中 `[codex].bin` 改为该路径。
+
+## 5. 可选：准备 pku3b
+
+只有用户需要教学网读取时才构建或登录 pku3b。
+
+检查：
+
+```bash
+[ -x crates/pku3b/target/debug/pku3b ] && crates/pku3b/target/debug/pku3b --version || true
+```
+
+如需构建，先说明需要 Rust/Cargo，然后执行：
+
+```bash
+cargo build --manifest-path crates/pku3b/Cargo.toml
+crates/pku3b/target/debug/pku3b --version
+```
+
+登录需要用户明确提供或手动输入凭据：
+
+```bash
+crates/pku3b/target/debug/pku3b auth login --username YOUR_ID --password YOUR_PASSWORD
+crates/pku3b/target/debug/pku3b --pretty auth status
+```
+
+不要把真实凭据写进任何文件。
+
+## 6. 运行验证
+
+```bash
+python -m compileall pkuclaw scripts
+python -m unittest discover
+```
+
+如果只改了文档站，还需要：
+
+```bash
+cd docs-site
+npm run build
+```
+
+## 7. 启动
+
+只测试飞书实时入口：
+
+```bash
+uv run pkuclaw realtime feishu
+```
+
+启动完整 daemon：
+
+```bash
+uv run pkuclaw daemon
+```
+
+启动失败时，向用户报告：
+
+- 执行到哪一步；
+- 失败命令；
+- 错误摘要；
+- 已经做过的检查；
+- 需要用户提供什么。

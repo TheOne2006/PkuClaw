@@ -1,23 +1,35 @@
 ---
 title: 使用指南
-description: 面向使用者的安装、配置和日常运行入口。
+description: 从快速开始到配置 PkuClaw 的用户操作手册。
 ---
 
-使用指南只关注如何把 PkuClaw 跑起来、接入渠道并使用实时消息、快捷任务和通知能力。这里不会展开内部模块边界，适合第一次安装和日常使用时查阅。
+使用指南只回答一个问题：**怎样把 PkuClaw 作为自己的 PKU 学习 Agent 跑起来并配置好**。
+
+这里不展开内部架构、runtime loader 或 channel adapter 的实现细节；如果你要改代码，请看开发者指南。
 
 <Cards>
-  <Card title="快速开始" href="/docs/user-guide/quickstart" description="从克隆仓库到启动第一个本地入口的最短路径。" />
-  <Card title="安装" href="/docs/user-guide/installation" description="准备 Python、uv、Codex provider 和飞书渠道依赖。" />
-  <Card title="配置说明" href="/docs/user-guide/configuration" description="复制本地配置，并理解哪些配置需要自己填写。" />
-  <Card title="Realtime Quick Actions" href="/docs/user-guide/quick-actions" description="配置用户主动触发的快捷任务。" />
+  <Card title="快速开始" href="/docs/user-guide/quickstart" description="让 Agent 代装，或按手动步骤完成最短启动路径。" />
+  <Card title="配置总览" href="/docs/user-guide/configuration" description="先分清启动配置、runtime 配置和可编辑行为配置。" />
+  <Card title="Channel 配置" href="/docs/user-guide/channel" description="先看 channel 总览，再进入飞书、微信等具体渠道。" />
+  <Card title="Agent 配置" href="/docs/user-guide/agent" description="先看 Agent 总览，再进入 Codex 或其他 provider。" />
+  <Card title="Skill 配置与扩展" href="/docs/user-guide/skills" description="添加自己的任务能力，并注册到 Skill Catalog。" />
+  <Card title="PKU 教学网登录" href="/docs/user-guide/pku-login" description="准备 pku3b、登录教学网，并检查可读数据。" />
+  <Card title="Quick Actions" href="/docs/user-guide/quick-actions" description="把常用任务做成飞书菜单或快捷入口。" />
 </Cards>
 
 ## 推荐顺序
 
-1. [快速开始](/docs/user-guide/quickstart)：完成最短启动路径。
-2. [安装](/docs/user-guide/installation)：补齐环境、provider 和渠道依赖。
-3. [配置说明](/docs/user-guide/configuration)：填写本地配置并理解运行时配置。
-4. [Realtime Quick Actions](/docs/user-guide/quick-actions)：把常用学习任务做成快捷入口。
-5. [FAQ](/docs/user-guide/faq)：排查常见问题。
+1. [快速开始](/docs/user-guide/quickstart)：先把仓库、依赖和最小本地配置准备好。
+2. [配置总览](/docs/user-guide/configuration)：知道哪些文件需要你填，哪些文件不能提交。
+3. [Channel 配置](/docs/user-guide/channel)：如果要用飞书，先让消息能进来、通知能出去。
+4. [Agent 配置](/docs/user-guide/agent)：确认 Codex CLI、模型、权限和超时。
+5. [Skill 配置与扩展](/docs/user-guide/skills)：把自己的学习任务写成可复用 skill。
+6. [PKU 教学网登录](/docs/user-guide/pku-login)：让 PkuClaw 可以读取教学网、作业和课表数据。
+7. [Quick Actions](/docs/user-guide/quick-actions)：把常用任务绑定成一键触发入口。
 
-如果你要修改 PkuClaw 的代码、prompt、runtime loader 或 channel adapter，请转到 [开发者指南](/docs/developer-guide)。
+## 这部分不包含什么
+
+- 不单独保留“安装”页；安装步骤已经合并到快速开始。
+- 不写 FAQ；等出现真实、重复的问题后再补。
+- 不讲日常对话技巧；当前先把配置链路讲清楚。
+- 不展开内部实现；实现细节留给开发者指南。
